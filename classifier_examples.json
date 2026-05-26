@@ -1,0 +1,44 @@
+{
+  "_comment": "Few-shot examples for the LLM intent classifier.",
+  "_instructions": [
+    "Add examples here to improve classification accuracy.",
+    "Each example needs a 'query' and a 'category'.",
+    "Valid categories: calculator, currency, weather, datetime, web_search, general",
+    "More examples = better accuracy. Aim for at least 2 per category.",
+    "Restart the app after editing this file for changes to take effect."
+  ],
+  "examples": [
+    {"query": "What is 15% of £340?",                              "category": "calculator"},
+    {"query": "What is 20% off £250?",                             "category": "calculator"},
+    {"query": "Convert 100 miles to km",                           "category": "calculator"},
+    {"query": "How many lbs is 75kg?",                             "category": "calculator"},
+    {"query": "What is 2 to the power of 10?",                     "category": "calculator"},
+    {"query": "Square root of 1764",                               "category": "calculator"},
+
+    {"query": "Convert £500 to USD",                               "category": "currency"},
+    {"query": "How much is €250 in pounds?",                       "category": "currency"},
+    {"query": "What is the GBP to EUR exchange rate?",             "category": "currency"},
+
+    {"query": "Will it rain in Leeds today?",                      "category": "weather"},
+    {"query": "What is the weather forecast for London this week?", "category": "weather"},
+    {"query": "Should I bring an umbrella to Birmingham today?",   "category": "weather"},
+
+    {"query": "What time is it in Tokyo?",                         "category": "datetime"},
+    {"query": "How many days until Christmas?",                    "category": "datetime"},
+    {"query": "What day was 6th June 1944?",                       "category": "datetime"},
+
+    {"query": "Who won the 2026 Canadian Grand Prix?",             "category": "web_search"},
+    {"query": "What are the latest AI news stories today?",        "category": "web_search"},
+    {"query": "What is the current price of Bitcoin?",             "category": "web_search"},
+    {"query": "What is the current price of Bitcoin in GBP?",      "category": "web_search"},
+    {"query": "What is the current Premier League table?",         "category": "web_search"},
+    {"query": "What are the top news stories in the UK today?",    "category": "web_search"},
+    {"query": "What's the price of gold per gram?",                "category": "web_search"},
+
+    {"query": "Explain async/await in C#",                         "category": "general"},
+    {"query": "What is the boiling point of water?",               "category": "general"},
+    {"query": "What is the speed of sound?",                       "category": "general"},
+    {"query": "Write a Python function to reverse a string",       "category": "general"},
+    {"query": "Explain the difference between TCP and UDP",        "category": "general"}
+  ]
+}

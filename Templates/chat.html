@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>MyAI</title>
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500&family=IBM+Plex+Mono:wght@400&display=swap" rel="stylesheet" />
+		<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" />
+		<link rel="stylesheet" href="../static/style/chat.css">
+		<link rel="icon" type="image/x-icon" href="../static/images/myai.ico">
+	</head>
+	<body>
+		<div class="sidebar-overlay" id="sidebar-overlay"></div>
+		<div class="app-layout">
+			<!-- ── Sidebar ──────────────────────────────────────────────────────────── -->
+			<aside class="sidebar" id="sidebar">
+				<div class="sidebar-top">
+					<button class="new-chat-btn" id="new-chat-btn">
+						<svg viewBox="0 0 14 14" xmlns="http://www.w3.org/2000/svg">
+							<path d="M7 1v12M1 7h12" stroke-linecap="round"/>
+						</svg>New chat
+					</button>
+				</div>
+				<nav class="conv-list" id="conv-list"></nav>
+			</aside>
+
+			<!-- ── Main shell ────────────────────────────────────────────────────────── -->
+			<div class="shell">
+				<!-- Header -->
+				<header>
+					<button class="sidebar-toggle" id="sidebar-toggle" title="Toggle history">
+						<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+							<path d="M2 4h12M2 8h12M2 12h12"/>
+						</svg>
+					</button>
+
+					<div class="logo-wrap">
+						<div class="logo-mark">
+							<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="none">
+								<circle cx="8" cy="8" r="6" stroke="#2abfb0" stroke-width="1.5"/>
+							</svg>
+						</div>
+						<span class="app-name">My<span>AI</span></span>
+						<span id="user-label" style="font-size:0.75rem;color:var(--text-muted);margin-left:4px;"></span>
+					</div>
+
+					<div class="header-meta">
+						<span class="status-dot">Inference: Local</span>
+						<span class="model-badge">Gemma 4</span>
+					</div>
+				</header>
+
+				<!-- Context bar -->
+				<div class="ctx-bar" id="ctx-bar" title="Context window usage">
+					<span class="ctx-label">CTX</span>
+					<div class="ctx-track"><div class="ctx-fill" id="ctx-fill"></div></div>
+					<span id="ctx-pct">—</span>
+					<span class="ctx-nums" id="ctx-nums">—</span>
+				</div>
+
+				<!-- Chat messages -->
+				<div class="chat-area" id="chat"></div>
+
+				<!-- Composer -->
+				<div class="composer-wrap">
+					<!-- File attachment preview bar (hidden until a file is chosen) -->
+					<!-- Pending file chips — shown as files are chosen, cleared after send -->
+					<div id="attachment-bar"
+						style="display:none; flex-wrap:wrap; padding:6px 12px; gap:6px; border-top:1px solid var(--border);">
+						<!-- chips injected here by JS -->
+					</div>
+
+					<div class="composer">
+						<!-- Hidden file input -->
+						<input type="file" id="file-input" style="display:none"
+							accept=".txt,.md,.py,.js,.ts,.jsx,.tsx,.css,.html,.cs,.cpp,.c,.h,.java,.json,.yaml,.yml,.sh,.sql,.xml,.csv,.toml,.ini,.env,.pdf,.docx,.xlsx">
+
+						<div class="composer-input-row">
+							<textarea
+								id="prompt-input"
+								rows="1"
+								placeholder="Type a message…"
+								autocomplete="off"
+								spellcheck="true"
+							></textarea>
+						</div>
+						<div class="composer-toolbar">
+							<button class="tool-btn" id="attach-btn" title="Attach file">
+								<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+									<path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
+										stroke-linecap="round" stroke-linejoin="round"/>
+								</svg>
+							</button>
+							<button class="tool-btn" id="voice-btn" title="Voice input" disabled>
+								<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+									<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"
+										stroke-linecap="round" stroke-linejoin="round"/>
+									<path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"
+										stroke-linecap="round" stroke-linejoin="round"/>
+								</svg>
+							</button>
+							<div class="toolbar-spacer"></div>
+							<button id="send-btn" title="Send (Enter)">
+								<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+									<path d="M8 12V4M4 8l4-4 4 4" stroke="#fff" stroke-width="1.75"
+										stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+								</svg>
+							</button>
+						</div>
+					</div>
+					<p class="composer-hint">Enter to send &nbsp;·&nbsp; Shift + Enter for new line</p>
+				</div>
+			</div><!-- /.shell -->
+		</div><!-- /.app-layout -->
+
+		<script src="../static/scripts/highlight.min.js"></script>
+		<script src="../static/scripts/chat.js"></script>
+	</body>
+</html>
