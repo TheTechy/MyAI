@@ -58,7 +58,8 @@ class MySkill(BaseSkill):
 ## Requirements
 
 - Python 3.11+
-- A GGUF model file (tested with [Gemma 4 E4B](https://huggingface.co/google/gemma-4-e4b-it))
+- A GGUF model file (MyAI was tested with [Gemma 4 E4B](https://huggingface.co/google/gemma-4-e4b-it))
+- A high performing model is the gemma-4-E4B-it-UD-Q8_K_XL.gguf from [Unsloth] ((https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF))
 - GPU recommended (Apple Silicon Metal, NVIDIA CUDA, or AMD ROCm)
 
 ---
