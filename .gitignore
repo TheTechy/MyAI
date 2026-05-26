@@ -37,3 +37,8 @@ venv/
 *.bak
 
 ROADMAP.md
+
+# User prompts — contains personal user configuration
+prompts.py
+!prompts.py.example
+!prompts.py.bak
