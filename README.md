@@ -90,7 +90,7 @@ Then drop your `.gguf` model file into the `models/` folder and start the app:
 python3 app.py
 ```
 
-Open your browser at `http://localhost:8080` and you're good to go.
+Open your browser at `http://localhost:8080` (or the port you chose) and you're good to go.
 
 ---
 
