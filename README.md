@@ -93,6 +93,9 @@ python3 app.py
 
 Open your browser at `http://localhost:8080` (or the port you chose) and you're good to go.
 
+>**Note:** New OpenWeatherMap API keys can take up to 2 hours to activate after registration. If the weather skill returns an error immediately after setup, simply wait and try again later.
+
+
 ---
 
 ### Manual Installation
