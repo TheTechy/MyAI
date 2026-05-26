@@ -3,11 +3,15 @@
 ### SET 1 - General
 I am planning a 5 day trip to Miami soon and would like to know some key highlights I should visit while I am there? Create an itinerary and display it here please.
 
+I am planning a day trip to the lake District soon and would like to know some key highlights I should visit while I am there?
+
 What's the atomic structure for Cobalt?
 
 What are the three longest rivers in the world?
 
-If you had to explain quantum entanglement to a 10 year old, how would you do it?
+If you had to explain quantum entanglement to a 14 year old, how would you do it?
+
+Why is the sky blue?
 
 ### SET 2 - Code
 Write a JavaScript debounce utility that supports both leading and trailing edge execution, includes a cancel method, and save it as debounce.js
