@@ -65,14 +65,47 @@ class MySkill(BaseSkill):
 
 ## Installation
 
-### 1. Clone the repository
+### Quick Start ✨ (recommended)
+
+Clone the repo and run the setup wizard — it handles everything:
+
+```bash
+git clone https://github.com/TheTechy/MyAI.git
+cd MyAI
+python3 setup_myai.py
+```
+
+The wizard will:
+- ✅ Check your Python version
+- ✅ Detect your GPU and install `llama-cpp-python` with the correct build flags (Metal, CUDA, ROCm or CPU)
+- ✅ Install all required and optional packages
+- ✅ Walk you through configuration and write your `.env` file
+- ✅ Create directories and initialise the database
+- ✅ Set up user accounts and PINs
+- ✅ Generate personalised system prompts per user
+
+Then drop your `.gguf` model file into the `models/` folder and start the app:
+
+```bash
+python3 app.py
+```
+
+Open your browser at `http://localhost:8080` and you're good to go.
+
+---
+
+### Manual Installation
+
+For those who prefer full control over each step.
+
+#### 1. Clone the repository
 
 ```bash
 git clone https://github.com/TheTechy/MyAI.git
 cd MyAI
 ```
 
-### 2. Install llama-cpp-python for your hardware
+#### 2. Install llama-cpp-python for your hardware
 
 **Apple Silicon (Metal):**
 ```bash
@@ -89,13 +122,13 @@ CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python --force-reinstall --no-
 pip install llama-cpp-python
 ```
 
-### 3. Install dependencies
+#### 3. Install dependencies
 
 ```bash
 pip install flask waitress python-dotenv pypdf python-docx openpyxl duckduckgo-search beautifulsoup4 requests
 ```
 
-### 4. Configure your environment
+#### 4. Configure your environment
 
 Copy `.env.example` to `.env` and fill in your values:
 
@@ -104,7 +137,8 @@ cp .env.example .env
 ```
 
 ```dotenv
-MODEL=/path/to/your/model.gguf
+MODEL=./models/your-model.gguf
+CTX_SIZE=12288
 PORT=8080
 MYAIDB=./DB/myai.db
 USERS=alice,bob
@@ -112,6 +146,8 @@ SECRET_KEY=your-secret-key-here
 FILE_OUTPUT_DIR=generated_files
 OWM_API_KEY=your_openweathermap_key      # optional — weather skill only
 OWM_UNITS=metric                          # metric | imperial | standard
+OWM_HOME_CITY=London, GB                  # optional — default location for weather
+SEARCH_REGION=uk-en                       # wt-wt | uk-en | us-en | de-de etc.
 ```
 
 Generate a secret key:
@@ -119,13 +155,13 @@ Generate a secret key:
 python3 -c "import secrets; print(secrets.token_hex(32))"
 ```
 
-### 5. Initialise the database
+#### 5. Initialise the database
 
 ```bash
 python3 -c "from db import init_db; init_db()"
 ```
 
-### 6. Run
+#### 6. Run
 
 ```bash
 python3 app.py
