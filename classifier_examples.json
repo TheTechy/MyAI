@@ -20,7 +20,7 @@
     {"query": "What is the GBP to EUR exchange rate?",             "category": "currency"},
 
     {"query": "Will it rain in Leeds today?",                      "category": "weather"},
-    {"query": "What is the weather forecast for London this week?", "category": "weather"},
+    {"query": "What is the weather forecast for London this week?","category": "weather"},
     {"query": "Should I bring an umbrella to Birmingham today?",   "category": "weather"},
 
     {"query": "What time is it in Tokyo?",                         "category": "datetime"},
