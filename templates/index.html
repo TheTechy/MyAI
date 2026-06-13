@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>MyAI - Welcome</title>
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500&family=IBM+Plex+Mono:wght@400&display=swap" rel="stylesheet" />
+		<link rel="stylesheet" href="../static/style/index.css">
+	<script>
+	  // Runs before <body> paints — prevents flash of wrong theme.
+	  (function () {
+	    var stored = localStorage.getItem('myai-theme');
+	    var sys = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+	    var theme = (stored === 'light' || stored === 'dark') ? stored : sys;
+	    document.documentElement.setAttribute('data-theme', theme);
+	  })();
+	</script>
+		</head>
+	<body>
+	<div class="shell">
+
+		<!-- Header -->
+		<header>
+			<div class="logo-wrap">
+				<div class="logo-mark">
+					<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="none">
+						<circle cx="8" cy="8" r="6" stroke="#2abfb0" stroke-width="1.5"/>
+					</svg>
+				</div>
+				<span class="app-name">My<span>AI</span></span>
+			</div>
+
+			<div class="header-meta">
+				<span class="status-dot">Inference: Local</span>
+				<span class="model-badge">Model: <span><b>Gemma 4</b></span></span>
+			</div>
+		</header>
+
+		<!-- Main -->
+		<div class="content">
+			<div class="steps-wrap">
+
+				<!-- ── Step 1: Name selection ── -->
+				<div class="step" id="step-name">
+					<span class="card-title">Select a name</span>
+
+					<div class="select-wrap">
+						<select id="name-select">
+							<option value="" selected>Choose a name…</option>
+							{% for user in users %}
+							<option value="{{ user }}">{{ user }}</option>
+							{% endfor %}
+						</select>
+					</div>
+
+					<button class="btn-primary" id="confirm-btn" disabled>Continue</button>
+				</div>
+
+				<!-- ── Step 2: PIN entry ── -->
+				<div class="step hidden" id="step-pin">
+					<span class="card-title">Enter your PIN</span>
+
+					<p class="pin-greeting">Welcome, <strong id="greeting-name"></strong>. Enter your 4-digit PIN to continue.</p>
+
+					<div class="pin-boxes" id="pin-boxes">
+						<input class="pin-box" id="pin-0" maxlength="1" inputmode="numeric" pattern="[0-9]" autocomplete="off" />
+						<input class="pin-box" id="pin-1" maxlength="1" inputmode="numeric" pattern="[0-9]" autocomplete="off" />
+						<input class="pin-box" id="pin-2" maxlength="1" inputmode="numeric" pattern="[0-9]" autocomplete="off" />
+						<input class="pin-box" id="pin-3" maxlength="1" inputmode="numeric" pattern="[0-9]" autocomplete="off" />
+					</div>
+
+					<div class="pin-error hidden" id="pin-error">Incorrect PIN. Please try again.</div>
+
+					<button class="btn-primary" id="pin-submit-btn" disabled>Sign in</button>
+
+					<button class="back-link" id="back-btn">← Choose a different name</button>
+				</div>
+
+			</div>
+		</div>
+
+	</div>
+
+	<script>
+		const stepName      = document.getElementById('step-name');
+		const stepPin       = document.getElementById('step-pin');
+		const selectEl      = document.getElementById('name-select');
+		const confirmBtn    = document.getElementById('confirm-btn');
+		const greetingName  = document.getElementById('greeting-name');
+		const pinBoxes      = Array.from(document.querySelectorAll('.pin-box'));
+		const pinBoxesWrap  = document.getElementById('pin-boxes');
+		const pinError      = document.getElementById('pin-error');
+		const pinSubmitBtn  = document.getElementById('pin-submit-btn');
+		const backBtn       = document.getElementById('back-btn');
+
+		const STORAGE_KEY = 'myai_selected_name';
+		let selectedName  = '';
+
+		// ── Step 1: name selection ──────────────────────────────────────────────
+		window.addEventListener('DOMContentLoaded', () => {
+			const saved = localStorage.getItem(STORAGE_KEY);
+			if (saved) {
+				selectEl.value = saved;
+				confirmBtn.disabled = false;
+			}
+		});
+
+		selectEl.addEventListener('change', () => {
+			confirmBtn.disabled = selectEl.value === '';
+		});
+
+		confirmBtn.addEventListener('click', () => {
+			const name = selectEl.value;
+			if (!name) return;
+			selectedName = name;
+			localStorage.setItem(STORAGE_KEY, name);
+			goToPin();
+		});
+
+		function goToPin() {
+			greetingName.textContent = selectedName;
+			stepName.classList.add('hidden');
+			stepPin.classList.remove('hidden');
+			clearPin();
+			pinBoxes[0].focus();
+		}
+
+		// ── Step 2: PIN entry ───────────────────────────────────────────────────
+		pinBoxes.forEach((box, idx) => {
+			box.addEventListener('input', () => {
+				// Only allow digits
+				box.value = box.value.replace(/\D/g, '').slice(-1);
+
+				hideError();
+				box.classList.toggle('filled', box.value !== '');
+
+				if (box.value && idx < 3) {
+					pinBoxes[idx + 1].focus();
+				}
+
+				updateSubmitBtn();
+
+				// Auto-submit when last box filled
+				if (idx === 3 && box.value) {
+					submitPin();
+				}
+			});
+
+			box.addEventListener('keydown', (e) => {
+				if (e.key === 'Backspace' && !box.value && idx > 0) {
+					pinBoxes[idx - 1].value = '';
+					pinBoxes[idx - 1].classList.remove('filled');
+					pinBoxes[idx - 1].focus();
+					updateSubmitBtn();
+				}
+
+				if (e.key === 'Enter') {
+					submitPin();
+				}
+			});
+
+			// Prevent non-numeric paste
+			box.addEventListener('paste', (e) => {
+				e.preventDefault();
+				const digits = (e.clipboardData.getData('text') || '').replace(/\D/g, '').slice(0, 4);
+				digits.split('').forEach((d, i) => {
+					if (pinBoxes[i]) {
+						pinBoxes[i].value = d;
+						pinBoxes[i].classList.add('filled');
+					}
+				});
+				const nextEmpty = pinBoxes.findIndex(b => !b.value);
+				(nextEmpty === -1 ? pinBoxes[3] : pinBoxes[nextEmpty]).focus();
+				updateSubmitBtn();
+				if (digits.length === 4) submitPin();
+			});
+		});
+
+		function getPin() {
+			return pinBoxes.map(b => b.value).join('');
+		}
+
+		function updateSubmitBtn() {
+			pinSubmitBtn.disabled = getPin().length < 4;
+		}
+
+		function clearPin() {
+			pinBoxes.forEach(b => {
+				b.value = '';
+				b.classList.remove('filled', 'error');
+			});
+			updateSubmitBtn();
+		}
+
+		function showError(msg) {
+			pinError.textContent = msg || 'Incorrect PIN. Please try again.';
+			pinError.classList.remove('hidden');
+			pinBoxes.forEach(b => b.classList.add('error'));
+			pinBoxesWrap.classList.remove('shake');
+			// Force reflow so animation restarts if triggered twice in a row
+			void pinBoxesWrap.offsetWidth;
+			pinBoxesWrap.classList.add('shake');
+			pinBoxesWrap.addEventListener('animationend', () => {
+				pinBoxesWrap.classList.remove('shake');
+			}, { once: true });
+			clearPin();
+			pinBoxes[0].focus();
+		}
+
+		function hideError() {
+			pinError.classList.add('hidden');
+			pinBoxes.forEach(b => b.classList.remove('error'));
+		}
+
+		async function submitPin() {
+			const pin = getPin();
+			if (pin.length < 4) return;
+
+			pinSubmitBtn.disabled = true;
+			pinSubmitBtn.textContent = 'Checking…';
+
+			try {
+				const res = await fetch('/auth', {
+					method:  'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body:    JSON.stringify({ user_id: selectedName, pin }),
+				});
+
+				if (res.ok) {
+					// Authenticated — go to chat
+					window.location.href = '/chat';
+				} else {
+					const data = await res.json().catch(() => ({}));
+					showError(data.error || 'Incorrect PIN. Please try again.');
+					pinSubmitBtn.disabled = false;
+					pinSubmitBtn.textContent = 'Sign in';
+				}
+			} catch {
+				showError('Network error. Please try again.');
+				pinSubmitBtn.disabled = false;
+				pinSubmitBtn.textContent = 'Sign in';
+			}
+		}
+
+		pinSubmitBtn.addEventListener('click', submitPin);
+
+		// ── Back button ─────────────────────────────────────────────────────────
+		backBtn.addEventListener('click', () => {
+			stepPin.classList.add('hidden');
+			stepName.classList.remove('hidden');
+			hideError();
+		});
+	</script>
+	</body>
+</html>

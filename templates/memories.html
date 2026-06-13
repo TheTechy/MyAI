@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>MyAI · Memories</title>
+	<link rel="preconnect" href="https://fonts.googleapis.com" />
+	<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500&family=IBM+Plex+Mono:wght@400&display=swap" rel="stylesheet" />
+	<link rel="stylesheet" href="../static/style/chat.css">
+	<link rel="icon" type="image/x-icon" href="../static/images/myai.ico">
+	<style>
+		.mem-page {
+			max-width: 760px;
+			margin: 0 auto;
+			padding: 32px 20px 80px;
+		}
+		.mem-head {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 12px;
+			margin-bottom: 8px;
+		}
+		.mem-head h1 {
+			font-size: 1.4rem;
+			font-weight: 500;
+			margin: 0;
+			color: var(--text-primary, #eee);
+		}
+		.mem-back {
+			display: inline-flex;
+			align-items: center;
+			gap: 6px;
+			font-size: 0.85rem;
+			text-decoration: none;
+			color: var(--accent, #2abfb0);
+			border: 1px solid var(--border, #333);
+			background: var(--surface, #1e1e1e);
+			padding: 7px 12px;
+			border-radius: 8px;
+		}
+		.mem-back:hover { border-color: var(--accent, #2abfb0); }
+		.mem-sub {
+			color: var(--text-muted, #888);
+			font-size: 0.85rem;
+			margin: 0 0 24px;
+		}
+		.mem-list { display: flex; flex-direction: column; gap: 10px; }
+		.mem-card {
+			display: flex;
+			align-items: flex-start;
+			justify-content: space-between;
+			gap: 14px;
+			background: var(--surface, #1e1e1e);
+			border: 1px solid var(--border, #333);
+			border-radius: 10px;
+			padding: 14px 16px;
+		}
+		.mem-card-body { flex: 1; min-width: 0; }
+		.mem-card-text {
+			color: var(--text-primary, #eee);
+			font-size: 0.95rem;
+			line-height: 1.45;
+			word-wrap: break-word;
+		}
+		.mem-card-date {
+			color: var(--text-muted, #666);
+			font-size: 0.72rem;
+			margin-top: 6px;
+			font-family: 'IBM Plex Mono', monospace;
+		}
+		.mem-del {
+			flex-shrink: 0;
+			background: transparent;
+			border: 1px solid var(--border, #333);
+			color: var(--text-muted, #888);
+			border-radius: 8px;
+			width: 32px; height: 32px;
+			cursor: pointer;
+			display: grid; place-items: center;
+			font-size: 1rem;
+			line-height: 1;
+		}
+		.mem-del:hover { color: #ff6b6b; border-color: #ff6b6b; }
+		.mem-empty {
+			text-align: center;
+			color: var(--text-muted, #888);
+			padding: 56px 20px;
+			border: 1px dashed var(--border, #444);
+			border-radius: 12px;
+		}
+		.mem-footer { margin-top: 28px; text-align: right; }
+		.mem-clear-all {
+			background: transparent;
+			border: 1px solid var(--border, #333);
+			color: #ff6b6b;
+			border-radius: 8px;
+			padding: 9px 16px;
+			font-size: 0.85rem;
+			cursor: pointer;
+		}
+		.mem-clear-all:hover { background: rgba(255, 107, 107, 0.1); border-color: #ff6b6b; }
+		.mem-clear-all:disabled { opacity: 0.4; cursor: default; }
+	</style>
+	<script>
+	  // Runs before <body> paints — prevents flash of wrong theme.
+	  (function () {
+	    var stored = localStorage.getItem('myai-theme');
+	    var sys = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+	    var theme = (stored === 'light' || stored === 'dark') ? stored : sys;
+	    document.documentElement.setAttribute('data-theme', theme);
+	  })();
+	</script>
+</head>
+<body>
+	<div class="mem-page">
+		<div class="mem-head">
+			<h1>Memories</h1>
+			<a class="mem-back" href="/chat">← Back to chat</a>
+		</div>
+		<p class="mem-sub">Facts you've explicitly asked MyAI to remember. They're injected into every conversation so MyAI can use them naturally.</p>
+
+		<div class="mem-list" id="mem-list"></div>
+
+		<div class="mem-footer">
+			<button class="mem-clear-all" id="mem-clear-all">Forget everything</button>
+		</div>
+	</div>
+
+	<script>
+		const listEl  = document.getElementById('mem-list');
+		const clearBtn = document.getElementById('mem-clear-all');
+
+		function fmtDate(iso) {
+			try {
+				return new Date(iso).toLocaleString('en-GB', {
+					day: '2-digit', month: 'short', year: 'numeric',
+					hour: '2-digit', minute: '2-digit',
+				});
+			} catch { return iso; }
+		}
+
+		function escHtml(s) {
+			return s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+			        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+		}
+
+		function render(memories) {
+			listEl.innerHTML = '';
+			if (!memories.length) {
+				listEl.innerHTML = '<div class="mem-empty">No memories yet. In a chat, say something like '
+					+ '“remember I\'m allergic to peanuts” and it\'ll show up here.</div>';
+				clearBtn.disabled = true;
+				return;
+			}
+			clearBtn.disabled = false;
+			for (const m of memories) {
+				const card = document.createElement('div');
+				card.className = 'mem-card';
+				card.innerHTML =
+					'<div class="mem-card-body">'
+					+   '<div class="mem-card-text">' + escHtml(m.content) + '</div>'
+					+   '<div class="mem-card-date">' + fmtDate(m.created_at) + '</div>'
+					+ '</div>'
+					+ '<button class="mem-del" title="Forget this" aria-label="Forget this">✕</button>';
+				card.querySelector('.mem-del').addEventListener('click', () => deleteOne(m.memory_id));
+				listEl.appendChild(card);
+			}
+		}
+
+		async function load() {
+			const res = await fetch('/api/memories');
+			if (res.status === 401) { window.location.href = '/'; return; }
+			render(await res.json());
+		}
+
+		async function deleteOne(id) {
+			const res = await fetch('/api/memories/' + encodeURIComponent(id), { method: 'DELETE' });
+			if (res.ok) load();
+		}
+
+		clearBtn.addEventListener('click', async () => {
+			if (!confirm('Forget everything MyAI remembers about you? This cannot be undone.')) return;
+			const res = await fetch('/api/memories', { method: 'DELETE' });
+			if (res.ok) load();
+		});
+
+		load();
+	</script>
+</body>
+</html>
