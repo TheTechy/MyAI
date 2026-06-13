@@ -73,10 +73,10 @@ class MySkill(BaseSkill):
 ## Requirements
 
 - Python 3.11+
-- A GGUF model file (MyAI was tested with [Gemma 4 E4B UD-Q8_K_XL from Unsloth](https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF) - Serch for: `UD-Q8_K_XL` on this page)
+- A GGUF model file (MyAI was tested with [Gemma 4 E4B UD-Q8_K_XL from Unsloth](https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF) - Search for: `UD-Q8_K_XL` on this page)
+- Obviously if your system has greater GPU capability or higher VRAM, then this opens up many larger, more capable models.
 - GPU recommended (Apple Silicon Metal, NVIDIA CUDA, or AMD ROCm)
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper) for voice input (optional)
-
 ---
 
 ## Installation
