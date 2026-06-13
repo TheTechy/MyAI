@@ -8,6 +8,10 @@ Built with Python, Flask and llama-cpp-python, MyAI wraps a local GGUF model in 
 
 ---
 
+![MyAI](/static/images/myai.png)
+
+---
+
 ## Features
 
 - **100% local inference** — GPU-accelerated via llama-cpp-python (Metal, CUDA, ROCm or CPU)
