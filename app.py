@@ -27,7 +27,7 @@ from core.db import (
 load_dotenv()  # loads from .env in the current directory
 
 # ── Version ────────────────────────────────────────────────────────────────────
-VERSION = "1.0.0"
+VERSION = "0.1.0"
 
 # ── Load / instantiate variables ───────────────────────────────────────────────
 ALLOWED_EXTENSIONS = {ext.lstrip(".") for ext in SUPPORTED_EXTENSIONS}
@@ -69,6 +69,7 @@ def _preload_whisper():
         print(f"Whisper model '{model_size}' loaded.")
     except Exception as e:
         print(f"Whisper pre-load skipped: {e}")
+        return ""
 
 # Module-level cache so the model is only loaded once per server process.
 _whisper_model = None
@@ -233,7 +234,6 @@ def download_message_file(file_id: str):
         as_attachment=True,
         download_name=row["filename"],
     )
-
 
 @app.route('/conversations/<conv_id>', methods=['DELETE'])
 def remove_conversation(conv_id: str):
