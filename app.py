@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import uuid
 from pathlib import Path
@@ -29,6 +30,44 @@ load_dotenv()  # loads from .env in the current directory
 # ── Version ────────────────────────────────────────────────────────────────────
 VERSION = "0.1.0"
 
+
+# ── Pretty model name ──────────────────────────────────────────────────────────
+def model_display_name(model_path: str) -> str:
+	"""
+	Turn a MODEL env var like './models/gemma-4-E4B-it-UD-Q8_K_XL.gguf' into a
+	short human-readable label like 'Gemma 4 E4B' for the header badge and
+	startup banner. Strips path, extension, quant suffixes, and role tags.
+	"""
+	if not model_path:
+		return "Unknown"
+
+	name = Path(model_path).stem
+
+	# Strip everything from the first quant marker to the end of the name.
+	name = re.sub(r'[-_.](?:UD[-_]?)?Q\d.*$', '', name, flags=re.IGNORECASE)
+	name = re.sub(r'[-_.](?:F16|FP16|BF16|F32|GGUF)(?:[-_.].*)?$', '', name, flags=re.IGNORECASE)
+	# Role tags as trailing tokens only
+	name = re.sub(r'[-_.](?:it|instruct|chat|base)$', '', name, flags=re.IGNORECASE)
+
+	# Convert separators to spaces, but ONLY for hyphens and underscores —
+	# keep dots so version strings like '3.5' or '4.1' stay intact.
+	name = re.sub(r'[-_]+', ' ', name).strip()
+
+	parts = []
+	for token in name.split():
+		# Pure-version tokens (digits and dots): leave intact (e.g. '3.5', '4.1')
+		if re.match(r'^[\d.]+$', token):
+			parts.append(token)
+		# Mixed alphanumeric tokens (E4B, R1, 14B, 9B, 8b): uppercase
+		elif re.match(r'^[A-Za-z]*\d+[A-Za-z]*$', token):
+			parts.append(token.upper())
+		# Regular word
+		else:
+			parts.append(token.capitalize())
+
+	return ' '.join(parts) or "Unknown"
+
+
 # ── Load / instantiate variables ───────────────────────────────────────────────
 ALLOWED_EXTENSIONS = {ext.lstrip(".") for ext in SUPPORTED_EXTENSIONS}
 MAX_CONTENT_LENGTH = 5 * 1024 * 1024  # 5 MB
@@ -44,7 +83,7 @@ app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
 
 # Required for sessions. Set SECRET_KEY in your .env file.
 # Generate a strong one with: python -c "import secrets; print(secrets.token_hex(32))"
-app.secret_key = os.getenv("SECRET_KEY", "e0048a069f6a595970fe8e230f2c016cb38f6d51ed38c61c0c886164c7cbf088")
+app.secret_key = os.getenv("SECRET_KEY", "CHANGE-THIS-WHEN-DEPLOYED")
 
 # —— Initialise app ───────────────────────────────────────────────────────────—
 def allowed_file(filename: str) -> bool:
@@ -98,7 +137,10 @@ def index():
 def chat():
     if not is_authenticated():
         return redirect(url_for('index'))
-    return render_template('chat.html')
+    return render_template(
+        'chat.html',
+        model_name=model_display_name(os.getenv("MODEL", "")),
+    )
 
 
 @app.route('/logout', methods=['GET'])
@@ -488,7 +530,7 @@ def _print_banner():
     R  = "\033[0m"         # reset
 
     model_path = os.getenv("MODEL", "unknown")
-    model_name = Path(model_path).name if model_path != "unknown" else "unknown"
+    model_name = model_display_name(model_path) if model_path != "unknown" else "unknown"
     ctx_size   = os.getenv("CTX_SIZE", "?")
     user_count = len([u for u in users if u.strip()])
 
