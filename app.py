@@ -5,7 +5,7 @@ import uuid
 from pathlib import Path
 from flask import Flask, request, render_template, Response, stream_with_context, session, redirect, url_for, send_file, abort
 from werkzeug.utils import secure_filename
-from core.llm_inference import ask_stream
+from core.llm_inference import ask_stream, warmup
 from core.file_ingestion import extract_text, ExtractionError, SUPPORTED_EXTENSIONS, IMAGE_EXTENSIONS
 from waitress import serve
 from dotenv import load_dotenv
@@ -526,6 +526,7 @@ def _print_banner():
     # ANSI colours — work in all modern terminals; gracefully ignored if not.
     C  = "\033[38;5;43m"   # accent teal
     D  = "\033[38;5;245m"  # dim grey
+    Y  = "\033[38;5;221m"  # warming yellow
     B  = "\033[1m"         # bold
     R  = "\033[0m"         # reset
 
@@ -533,6 +534,7 @@ def _print_banner():
     model_name = model_display_name(model_path) if model_path != "unknown" else "unknown"
     ctx_size   = os.getenv("CTX_SIZE", "?")
     user_count = len([u for u in users if u.strip()])
+    warmup_on  = os.getenv("WARMUP", "1") == "1"
 
     banner = f"""{C}
     ███╗   ███╗██╗   ██╗ █████╗ ██╗
@@ -547,10 +549,22 @@ def _print_banner():
     {B}Context{R} {ctx_size} tokens
     {B}Users{R}   {user_count} configured
     {B}URL{R}     http://localhost:{port}
-
-    {C}● ready{R}   {D}— press Ctrl+C to stop{R}
 """
     print(banner)
+
+    # Status line — show "warming…" while the warmup call runs, then flip to
+    # "ready" by overwriting the same line. The trailing \r returns the cursor
+    # to the start of the line so the next print clears the previous status.
+    if warmup_on:
+        print(f"    {Y}● warming…{R}   {D}— priming model weights{R}", end="\r", flush=True)
+        warmed = warmup()
+        # Clear the warming line, then print the ready status
+        print(" " * 70, end="\r")  # blank the line
+        ready_note = "" if warmed else f"   {D}(warmup skipped){R}"
+        print(f"    {C}● ready{R}{ready_note}   {D}— press Ctrl+C to stop{R}\n")
+    else:
+        # Warmup disabled — print ready immediately with a hint
+        print(f"    {C}● ready{R}   {D}— warmup off; first prompt may be slow{R}\n")
 
 
 if __name__ == "__main__":

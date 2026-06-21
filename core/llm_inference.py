@@ -70,6 +70,51 @@ MAX_HISTORY_TURNS = 10
 
 SEARCH_TAG_RE = re.compile(r'\[SEAR(?:C?SEARCH|CH):\s*(.+?)\]', re.IGNORECASE)
 
+
+# ── Warmup ─────────────────────────────────────────────────────────────────────
+def warmup() -> bool:
+    """
+    Run a tiny throwaway inference to page all weights into RAM and trigger
+    JIT compilation of any Metal/CUDA kernels. This makes the user's first
+    real prompt feel as fast as subsequent ones.
+
+    Also primes the classifier with a short low-temp call, so the very first
+    user message doesn't pay the classifier's own cold-start cost.
+
+    Controlled by the WARMUP env var:
+        WARMUP=1 (default)  — run warmup at startup
+        WARMUP=0            — skip (handy during dev iteration)
+
+    Returns True if warmup ran, False if skipped or failed.
+    """
+    if os.getenv("WARMUP", "1") != "1":
+        return False
+
+    try:
+        # 1) Main-model warmup — single token, no streaming
+        llm(
+            "<start_of_turn>user\nHi<end_of_turn>\n<start_of_turn>model\n",
+            max_tokens=1,
+            stop=["<end_of_turn>"],
+            echo=False,
+            stream=False,
+            temperature=0.0,
+        )
+        # 2) Classifier warmup — same shape as a real classifier call so
+        #    its kernel path is hot too
+        llm(
+            "<start_of_turn>user\nClassify: hi\n<end_of_turn>\n<start_of_turn>model\n",
+            max_tokens=2,
+            stop=["<end_of_turn>", "\n"],
+            echo=False,
+            stream=False,
+            temperature=0.1,
+        )
+        return True
+    except Exception as e:
+        print(f"[warmup] skipped: {e}")
+        return False
+
 # ── Classifier examples ────────────────────────────────────────────────────────
 def _load_classifier_examples() -> str:
     """
