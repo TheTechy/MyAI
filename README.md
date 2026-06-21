@@ -39,7 +39,7 @@ Each skill is a self-contained module in `myai_skills/`. The LLM classifier rout
 |-------|-----------------|-----------------|
 | 🧮 **Calculator** | `What is 15% of £340?`, `Convert 100 miles to km`, `Square root of 1764` | None — pure Python |
 | 💱 **Currency** | `Convert £500 to USD`, `GBP to EUR rate` | [Frankfurter](https://www.frankfurter.app) — free, no key |
-| 🌤 **Weather** | `Will it rain in Leeds today?`, `5-day forecast for Tokyo` | [OpenWeatherMap](https://openweathermap.org) — free tier |
+| 🌤 **Weather** | `Will it rain in London today?`, `5-day forecast for Tokyo` | [OpenWeatherMap](https://openweathermap.org) — free tier |
 | 📅 **Date & Time** | `What time is it in New York?`, `How many days until Christmas?`, `What day was D-Day?` | None — pure Python |
 | 🔍 **Web Search** | `Who won the last F1 race?`, `Current Bitcoin price` | DuckDuckGo + BeautifulSoup |
 | 🖼️ **Image** | `Resize this image to 800x600`, `Convert this PNG to JPEG`, `Make this image greyscale` | Pillow |
