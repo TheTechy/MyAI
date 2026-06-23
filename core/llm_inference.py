@@ -115,6 +115,7 @@ def warmup() -> bool:
         print(f"[warmup] skipped: {e}")
         return False
 
+
 # ── Classifier examples ────────────────────────────────────────────────────────
 def _load_classifier_examples() -> str:
     """
@@ -222,28 +223,67 @@ def _classify_intent(user_input: str):
 
 
 # ── File request detection & post-processing ───────────────────────────────────
+# Order matters: when multiple patterns could match (e.g. "HTML page" AND
+# "JavaScript" both appear), the FIRST match wins. So container/document
+# formats (html, docx, xlsx, md) are listed before programming languages,
+# because a prompt like "make an HTML page, no JavaScript" wants .html.
 _FILE_REQUEST_PATTERNS = [
+    (re.compile(r'\b(html\s+(?:file|page|document)|web\s*page|\.html?)\b', re.IGNORECASE), '.html'),
     (re.compile(r'\b(word\s+doc(?:ument)?|\.docx?)\b',        re.IGNORECASE), '.docx'),
     (re.compile(r'\b(excel|spreadsheet|\.xlsx?)\b',            re.IGNORECASE), '.xlsx'),
     (re.compile(r'\b(markdown|\.md)\b',                        re.IGNORECASE), '.md'),
-    (re.compile(r'\b(python\s+(?:script|file)|\.py)\b',        re.IGNORECASE), '.py'),
-    (re.compile(r'\b(javascript|\.js)\b',                      re.IGNORECASE), '.js'),
-    (re.compile(r'\b(typescript|\.ts)\b',                      re.IGNORECASE), '.ts'),
-    (re.compile(r'\b(html\s+(?:file|page)|\.html?)\b',         re.IGNORECASE), '.html'),
     (re.compile(r'\b(css\s+(?:file|stylesheet)|\.css)\b',      re.IGNORECASE), '.css'),
-    (re.compile(r'\b(csv\s+(?:file|data)|\.csv)\b',            re.IGNORECASE), '.csv'),
+    (re.compile(r'\b(csv\s+(?:file|data)?|\.csv)\b',          re.IGNORECASE), '.csv'),
     (re.compile(r'\b(json\s+file|\.json)\b',                   re.IGNORECASE), '.json'),
     (re.compile(r'\b(sql\s+(?:file|script)|\.sql)\b',          re.IGNORECASE), '.sql'),
     (re.compile(r'\b(shell\s+script|bash\s+script|\.sh)\b',    re.IGNORECASE), '.sh'),
     (re.compile(r'\b(text\s+file|\.txt)\b',                    re.IGNORECASE), '.txt'),
+    # Programming languages come last — and require the word "script", "file",
+    # or the literal extension, so a bare mention like "no JavaScript" never
+    # matches by accident.
+    (re.compile(r'\b(python\s+(?:script|file)|\.py)\b',        re.IGNORECASE), '.py'),
+    (re.compile(r'\b(javascript\s+(?:file|script)|\.js)\b',    re.IGNORECASE), '.js'),
+    (re.compile(r'\b(typescript\s+(?:file|script)|\.ts)\b',    re.IGNORECASE), '.ts'),
 ]
 
+# Language-as-constraint patterns: if any of these match, the language is
+# being EXCLUDED, not requested. Stops "no JavaScript" / "without React"
+# from being read as a file-type request even before the patterns above run.
+_LANG_NEGATION_RE = re.compile(
+    r'\b(no|without|not|never|skip|avoid|exclude|don\'?t\s+use|no\s+need\s+for)\s+'
+    r'(?:any\s+)?'
+    r'(javascript|js|typescript|ts|python|css|html|sql|bash|shell)\b',
+    re.IGNORECASE,
+)
+
+# Filename topic stopwords — these get filtered out when picking keywords for
+# the filename. We strip language/format words too, because we want the name
+# to describe WHAT the file is (e.g. "profile_card") not WHAT FORMAT it's in
+# (we already have the extension for that).
 _FILENAME_STOPWORDS = {
-    'a', 'an', 'the', 'generate', 'create', 'make', 'write', 'give', 'produce',
-    'me', 'us', 'my', 'please', 'page', 'two', 'three', 'file', 'document',
-    'word', 'excel', 'that', 'with', 'and', 'or', 'for', 'about', 'on', 'in',
-    'of', 'to', 'is', 'it', 'be', 'as', 'at', 'by', 'we', 'do', 'can',
-    'format', 'formatted', 'professional', 'detailed', 'comprehensive', 'full',
+    # Articles, pronouns, conjunctions
+    'a', 'an', 'the', 'me', 'us', 'my', 'our', 'your', 'that', 'this',
+    'with', 'and', 'or', 'for', 'about', 'on', 'in', 'of', 'to', 'is', 'it',
+    'be', 'as', 'at', 'by', 'we', 'do', 'can', 'should', 'must', 'will',
+    'has', 'have', 'are', 'was', 'were', 'so', 'if', 'but', 'than', 'then',
+    # Quantifiers / vague modifiers
+    'one', 'two', 'three', 'four', 'five', 'some', 'any', 'all', 'each',
+    'only', 'just', 'very', 'also', 'such', 'more', 'most', 'less', 'few',
+    # Generic creation verbs
+    'generate', 'create', 'make', 'write', 'give', 'produce', 'build',
+    'craft', 'design', 'develop', 'output', 'save', 'export',
+    # Generic file nouns
+    'file', 'document', 'page', 'script', 'sheet', 'spreadsheet',
+    # File-format words (the extension already conveys this)
+    'word', 'excel', 'html', 'css', 'javascript', 'python', 'markdown',
+    'json', 'csv', 'sql', 'bash', 'shell', 'text', 'pdf', 'doc', 'web',
+    'language', 'extension', 'format', 'syntax',
+    # Adjectives that don't help identify content
+    'please', 'kindly', 'format', 'formatted', 'professional', 'detailed',
+    'comprehensive', 'full', 'simple', 'basic', 'modern', 'responsive',
+    'polished', 'clean', 'nice', 'good', 'great', 'visually', 'centered',
+    'beautiful', 'styled', 'styling', 'using', 'use', 'single', 'includes',
+    'including', 'similar', 'shown', 'show', 'look', 'looks', 'like',
 }
 
 # Explicit no-file instructions — these override any file type mention
@@ -268,23 +308,78 @@ def _detect_requested_extension(user_input: str) -> str | None:
     Return the file extension the user requested, or None.
     Requires both a file-type signal AND a creation-intent verb.
     Returns None immediately if the user explicitly said NOT to generate a file.
+
+    Note: any language mentions wrapped in negation (e.g. "no JavaScript",
+    "without React") are stripped before pattern matching, so "create an
+    HTML page, no JavaScript" correctly returns .html rather than .js.
     """
     # Explicit no-file instruction takes priority over everything
     if _NO_FILE_RE.search(user_input):
         return None
     if not _CREATE_INTENT_RE.search(user_input):
         return None
+
+    # Remove "no JavaScript", "without Python" etc. so they can't be matched
+    # as the desired file type. Anything else (intent words, file-type cues
+    # like "HTML page") survives untouched.
+    cleaned = _LANG_NEGATION_RE.sub('', user_input)
+
     for pattern, ext in _FILE_REQUEST_PATTERNS:
-        if pattern.search(user_input):
+        if pattern.search(cleaned):
             return ext
     return None
 
 def _make_filename(user_input: str, ext: str) -> str:
-    """Derive a reasonable filename from the user's request."""
-    words    = re.findall(r'[a-zA-Z]+', user_input.lower())
-    keywords = [w for w in words if w not in _FILENAME_STOPWORDS and len(w) > 2][:5]
-    stem     = '_'.join(keywords) if keywords else 'output'
-    return f"{stem}{ext}"
+    """
+    Derive a reasonable filename from the user's request.
+
+    Strategy:
+      1. Find the file-type cue position (e.g. "HTML page") if any — words
+         near this cue are most likely the topic.
+      2. Strip negated-language phrases so they don't pollute the keywords.
+      3. Filter out stopwords (articles, generic verbs, language/format names).
+      4. Take the first 3-4 meaningful tokens as the filename stem.
+
+    Falls back to 'output' if nothing survives.
+    """
+    # Strip negated languages first ("no JavaScript" → "")
+    text = _LANG_NEGATION_RE.sub('', user_input)
+
+    # Find where the file-type cue lives; words near it are most relevant
+    cue_match = None
+    for pattern, _ in _FILE_REQUEST_PATTERNS:
+        m = pattern.search(text)
+        if m and (cue_match is None or m.start() < cue_match.start()):
+            cue_match = m
+
+    words = re.findall(r'[a-zA-Z]+', text.lower())
+    candidates = [w for w in words if w not in _FILENAME_STOPWORDS and len(w) > 2]
+
+    if not candidates:
+        return f"output{ext}"
+
+    # If we found a cue, prefer words within ~5 positions of it
+    if cue_match:
+        all_words = re.findall(r'[a-zA-Z]+', text)
+        try:
+            cue_word = cue_match.group(0).split()[0].lower()
+            cue_idx  = next(i for i, w in enumerate(all_words) if w.lower() == cue_word)
+            nearby   = [w.lower() for w in all_words[max(0, cue_idx - 5):cue_idx + 6]]
+            near     = [w for w in nearby if w in candidates]
+            if near:
+                # Preserve original order, dedupe
+                seen, ordered = set(), []
+                for w in near:
+                    if w not in seen:
+                        seen.add(w)
+                        ordered.append(w)
+                if ordered:
+                    return f"{'_'.join(ordered[:4])}{ext}"
+        except (StopIteration, IndexError):
+            pass
+
+    # Fallback: first 3 meaningful keywords from anywhere
+    return f"{'_'.join(candidates[:3])}{ext}"
 
 def _wrap_as_file_block(content: str, filename: str) -> str:
     """Wrap prose into a [FILE:…][/FILE] block for extract_and_generate."""
