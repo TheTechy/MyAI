@@ -1368,6 +1368,7 @@ def commit(config: dict):
         f"USERS={config['USERS']}",
         f"FILE_OUTPUT_DIR={GEN_DIR}",
         f"SECRET_KEY={secret_key}",
+        f"WARMUP=1",
         "",
         "# Weather skill (optional — leave blank to disable)",
         f"OWM_API_KEY={config.get('OWM_API_KEY', '')}",
