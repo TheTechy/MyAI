@@ -76,6 +76,91 @@ _NEGATIVE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# ── Atomisation: turn "I live in City, born in YYYY and my name is Name"
+# into three separate memories. Splits on commas and ", and" / " and " when
+# the segments look like independent facts.
+_SPLIT_RE = re.compile(
+    r"\s*(?:,\s*and\s+|,\s+|\s+and\s+|;\s*)",
+    re.IGNORECASE,
+)
+
+# Minimum fact length after stripping — anything shorter is likely a fragment
+# we shouldn't store on its own ("of", "in 1988" — won't make sense alone).
+_MIN_FACT_LEN = 6
+
+
+def _atomise(text: str) -> list[str]:
+    """
+    Break a compound 'remember X, Y and Z' input into independent facts.
+
+    Conservative — if splitting would produce fragments that don't read as
+    standalone facts, return the original text as a single atom.
+
+    Heuristics:
+      - Don't split inside numbers (e.g. "1,000")
+      - Each piece must be at least _MIN_FACT_LEN characters
+      - Each piece must start with something that could begin a fact
+        (a pronoun, "my", "I", "I'm", a verb, or be long enough not to matter)
+    """
+    text = text.strip().rstrip(".!")
+    if not text:
+        return []
+
+    # Protect numbers like 1,000 / 10,000 from being split on the comma
+    text_safe = re.sub(r"(\d),(\d)", r"\1__COMMA__\2", text)
+
+    pieces = [p.strip() for p in _SPLIT_RE.split(text_safe) if p.strip()]
+    pieces = [p.replace("__COMMA__", ",") for p in pieces]
+
+    if len(pieces) < 2:
+        return [text]
+
+    # Each piece must be substantive — both in characters and word count.
+    # Word count guards against "<noun> and <noun>" patterns like
+    # "research and development" being read as two separate facts.
+    if any(len(p) < _MIN_FACT_LEN or len(p.split()) < 2 for p in pieces):
+        return [text]
+
+    # If a piece doesn't start fact-like, prepend the subject from the previous
+    # piece — e.g. "born in 1988" → "I was born in 1988" if the previous
+    # piece's subject was "I". This handles "I live in London and was born in 1988".
+    fixed_pieces = []
+
+    # A piece is "subject-led" if it starts with an explicit subject —
+    # I / I'm / I've / I'll / my / me / mine. Verb-only starts like "was born"
+    # need a subject prepended.
+    subject_led = re.compile(
+        r"^(?:i\b|i'?m|i'?ve|i'?ll|i'?d|my\b|me\b|mine\b)",
+        re.IGNORECASE,
+    )
+    # Determine the subject of the first piece so we can lift it
+    first = pieces[0]
+    if first.lower().startswith("i "):
+        lift = "I "
+    elif first.lower().startswith("i'"):
+        # I'm, I've, I'll → fall back to "I" for prepending verbs to other pieces
+        lift = "I "
+    elif first.lower().startswith("my "):
+        lift = "My "
+    else:
+        lift = None
+
+    for i, piece in enumerate(pieces):
+        if i == 0 or subject_led.match(piece):
+            fixed_pieces.append(piece)
+        elif lift:
+            # Prepend the subject — e.g. "was born in 1988" → "I was born in 1988"
+            fixed_pieces.append(f"{lift}{piece}")
+        else:
+            # No clean subject to lift — bail out and keep as one
+            return [text]
+
+    # Sanity check: every fixed piece should still meet the minimum length
+    if any(len(p) < _MIN_FACT_LEN for p in fixed_pieces):
+        return [text]
+
+    return fixed_pieces
+
 
 class MemorySkill(BaseSkill):
     name        = "memory"
@@ -153,8 +238,15 @@ class MemorySkill(BaseSkill):
             content = _ADD_LEAD_RE.sub("", query).strip().rstrip(".!")
             if not content:
                 return "What would you like me to remember? For example: \"remember I'm allergic to peanuts\"."
-            add_memory(user_id, content)
-            return f"Got it — I'll remember that {content}."
+
+            atoms = _atomise(content)
+            for atom in atoms:
+                add_memory(user_id, atom)
+
+            if len(atoms) == 1:
+                return f"Got it — I'll remember that {atoms[0]}."
+            joined = "; ".join(atoms)
+            return f"Got it — I've saved {len(atoms)} things: {joined}."
 
         # ── Fallback ────────────────────────────────────────────────────────────
         return self._render_list(user_id)
