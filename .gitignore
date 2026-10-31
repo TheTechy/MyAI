@@ -15,6 +15,7 @@ generated_files/*
 # ── Model files — ignore the weights, keep the directory ──────────────────────
 models/*
 *.gguf
+!models/.gitkeep
 
 # ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
