@@ -135,6 +135,12 @@ a:visited {
 	flex-shrink: 0;
 }
 
+.sidebar-foot {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
 .new-chat-btn {
 	width: 100%;
 	display: flex;
@@ -979,7 +985,21 @@ header { padding: 14px 24px; }
 
 @media (max-width: 600px) {
 .shell { padding: 0; }
-header { padding: 14px 8px; }
+header { padding: 14px 8px; gap: 8px; }
+/* Keep the header to one line on a phone: the menu button replaces the logo
+   tile, the status keeps its dot (text moves to the tooltip), and a long
+   model name is cut short rather than wrapping. */
+.logo-mark { display: none; }
+.app-name, #user-label { white-space: nowrap; }
+.header-meta { min-width: 0; gap: 8px; }
+.status-dot { font-size: 0; gap: 0; }
+.model-badge {
+	min-width: 0;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.theme-toggle { flex-shrink: 0; }
 .chat-area { padding: 16px 8px; }
 .composer-wrap { padding: 12px 8px 16px; }
 }

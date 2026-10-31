@@ -294,8 +294,8 @@
 					</div>
 
 					<div class="header-meta">
-						<span class="status-dot">Inference: Local</span>
-						<span class="model-badge">{{ model_name | default('Local Model') }}</span>
+						<span class="status-dot" title="Inference: Local">Inference: Local</span>
+						<span class="model-badge" title="{{ model_name | default('Local Model') }}">{{ model_name | default('Local Model') }}</span>
 
 						<div class="theme-toggle" role="group" aria-label="Theme">
 							<button id="theme-light" type="button" title="Light mode" aria-label="Light mode">
