@@ -359,7 +359,7 @@ def install(ui: TUI, cfg: dict, user: dict | None, remove_placeholder: bool) -> 
                  f"Put a .gguf file in {MODELS_DIR.name}/ and run ./install.sh again "
                  "to choose it.", ""]
     body += ["To start MyAI, run this in the MyAI folder:", "",
-             "    " + ui.paint(".venv/bin/python app.py", "cyan"), "",
+             "    " + ui.paint("./start.sh", "cyan"), "",
              f"Then open http://localhost:{cfg['PORT']} in your browser"
              + (f" and sign in as {user['name']}." if user else ".")]
     ui.show(body, wait=False)

@@ -98,7 +98,7 @@ try:
                    [("George", "1234", "senior")]
         assert calls == ["build", "reqs", "check"], calls
         assert "built" in M.LOG_PATH.read_text() and "MyAI is ready" in out
-        assert "didn't match" in out and "http://localhost:8888" in out
+        assert "didn't match" in out and "http://localhost:8888" in out and "./start.sh" in out
         print("ok  first install: .env, DB user, build → components → check, PIN re-ask")
 
         # 3) Re-run: existing answers are the defaults (Enter all the way), the
