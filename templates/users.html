@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>MyAI · Users</title>
+	<link rel="preconnect" href="https://fonts.googleapis.com" />
+	<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500&family=IBM+Plex+Mono:wght@400&display=swap" rel="stylesheet" />
+	<link rel="stylesheet" href="../static/style/chat.css">
+	<link rel="icon" type="image/x-icon" href="../static/images/myai.ico">
+	<style>
+		.usr-page {
+			max-width: 820px;
+			margin: 0 auto;
+			padding: 32px 20px 80px;
+		}
+		.usr-head {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 12px;
+			margin-bottom: 8px;
+		}
+		.usr-head h1 {
+			font-size: 1.4rem;
+			font-weight: 500;
+			margin: 0;
+			color: var(--text-primary, #eee);
+		}
+		.usr-head-actions { display: inline-flex; gap: 8px; }
+		.usr-back, .usr-add-btn {
+			display: inline-flex;
+			align-items: center;
+			gap: 6px;
+			font-size: 0.85rem;
+			text-decoration: none;
+			color: var(--accent, #2abfb0);
+			border: 1px solid var(--border, #333);
+			background: var(--surface, #1e1e1e);
+			padding: 7px 12px;
+			border-radius: 8px;
+			cursor: pointer;
+			font-family: inherit;
+		}
+		.usr-back:hover, .usr-add-btn:hover { border-color: var(--accent, #2abfb0); }
+
+		.usr-sub {
+			color: var(--text-muted, #888);
+			font-size: 0.85rem;
+			margin: 0 0 24px;
+		}
+
+		.usr-list { display: flex; flex-direction: column; gap: 10px; }
+		.usr-card {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 14px;
+			background: var(--surface, #1e1e1e);
+			border: 1px solid var(--border, #333);
+			border-radius: 10px;
+			padding: 14px 16px;
+		}
+		.usr-card.inactive { opacity: 0.55; }
+		.usr-card-body { flex: 1; min-width: 0; }
+		.usr-name {
+			color: var(--text-primary, #eee);
+			font-size: 1rem;
+			font-weight: 500;
+			text-transform: capitalize;
+			display: inline-flex;
+			align-items: center;
+			gap: 8px;
+		}
+		.usr-badge {
+			font-size: 0.7rem;
+			padding: 2px 7px;
+			border-radius: 4px;
+			font-family: 'IBM Plex Mono', monospace;
+			text-transform: uppercase;
+			letter-spacing: 0.03em;
+			border: 1px solid var(--border, #333);
+			color: var(--text-muted, #888);
+		}
+		.usr-badge.you { color: var(--accent, #2abfb0); border-color: var(--accent, #2abfb0); }
+		.usr-badge.inactive { color: #ff6b6b; border-color: #ff6b6b; }
+		.usr-badge.no-pin { color: #f4a24a; border-color: #f4a24a; }
+		.usr-meta {
+			color: var(--text-muted, #888);
+			font-size: 0.78rem;
+			margin-top: 4px;
+		}
+		.usr-actions { display: inline-flex; gap: 6px; }
+		.usr-action-btn {
+			background: transparent;
+			border: 1px solid var(--border, #333);
+			color: var(--text-muted, #888);
+			border-radius: 8px;
+			padding: 6px 11px;
+			font-size: 0.78rem;
+			cursor: pointer;
+			font-family: inherit;
+		}
+		.usr-action-btn:hover { color: var(--accent, #2abfb0); border-color: var(--accent, #2abfb0); }
+		.usr-action-btn.danger:hover { color: #ff6b6b; border-color: #ff6b6b; }
+		.usr-action-btn.reactivate:hover { color: #34c87a; border-color: #34c87a; }
+		.usr-action-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+		/* ── Modal ─────────────────────────────────────────────────────── */
+		.modal-backdrop {
+			position: fixed; inset: 0;
+			background: rgba(0,0,0,0.55);
+			display: none;
+			align-items: center;
+			justify-content: center;
+			padding: 20px;
+			z-index: 1000;
+		}
+		.modal-backdrop.open { display: flex; }
+		.modal {
+			background: var(--surface, #1e1e1e);
+			border: 1px solid var(--border, #333);
+			border-radius: 12px;
+			padding: 22px 24px;
+			width: 100%;
+			max-width: 480px;
+		}
+		.modal h2 {
+			font-size: 1.05rem;
+			font-weight: 500;
+			margin: 0 0 14px;
+			color: var(--text-primary, #eee);
+		}
+		.modal .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+		.modal label { font-size: 0.8rem; color: var(--text-muted, #888); }
+		.modal input[type=text], .modal select {
+			background: var(--bg, #111);
+			border: 1px solid var(--border, #333);
+			border-radius: 8px;
+			padding: 9px 11px;
+			color: var(--text-primary, #eee);
+			font-size: 0.92rem;
+			font-family: inherit;
+			width: 100%;
+			box-sizing: border-box;
+		}
+		.modal input[type=text]:focus, .modal select:focus {
+			outline: none;
+			border-color: var(--accent, #2abfb0);
+		}
+		.field-status {
+			font-size: 0.75rem;
+			min-height: 16px;
+			color: var(--text-muted, #888);
+		}
+		.field-status.ok { color: #34c87a; }
+		.field-status.bad { color: #ff6b6b; }
+		.pin-row { display: flex; gap: 8px; justify-content: flex-start; }
+		.pin-row input {
+			width: 44px; height: 50px;
+			text-align: center;
+			font-size: 1.4rem;
+			background: var(--bg, #111);
+			border: 1px solid var(--border, #333);
+			border-radius: 8px;
+			color: var(--text-primary, #eee);
+			font-family: 'IBM Plex Mono', monospace;
+		}
+		.pin-row input:focus { outline: none; border-color: var(--accent, #2abfb0); }
+		.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+		.modal-btn {
+			background: transparent;
+			border: 1px solid var(--border, #333);
+			color: var(--text-primary, #eee);
+			border-radius: 8px;
+			padding: 8px 16px;
+			font-size: 0.85rem;
+			cursor: pointer;
+			font-family: inherit;
+		}
+		.modal-btn.primary { background: var(--accent, #2abfb0); color: #0d2b28; border-color: var(--accent, #2abfb0); font-weight: 500; }
+		.modal-btn.primary:disabled { opacity: 0.4; cursor: not-allowed; }
+		.modal-error {
+			font-size: 0.8rem;
+			color: #ff6b6b;
+			min-height: 18px;
+			margin: -6px 0 12px;
+		}
+
+		.usr-empty {
+			text-align: center;
+			color: var(--text-muted, #888);
+			padding: 56px 20px;
+			border: 1px dashed var(--border, #444);
+			border-radius: 12px;
+		}
+	</style>
+	<script>
+	  // Match the theme immediately, before body paints, to avoid a flash.
+	  (function () {
+	    var stored = localStorage.getItem('myai-theme');
+	    var sys = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+	    var theme = (stored === 'light' || stored === 'dark') ? stored : sys;
+	    document.documentElement.setAttribute('data-theme', theme);
+	  })();
+	</script>
+</head>
+<body>
+	<div class="usr-page">
+		<div class="usr-head">
+			<h1>Users</h1>
+			<div class="usr-head-actions">
+				<button class="usr-add-btn" id="usr-add-open">+ Add user</button>
+				<a class="usr-back" href="/chat">← Back to chat</a>
+			</div>
+		</div>
+		<p class="usr-sub">
+			Add, edit, or deactivate the people who can sign into MyAI.
+			Deactivated users are hidden from the login page but their conversations
+			and memories are kept.
+		</p>
+
+		<div class="usr-list" id="usr-list"></div>
+	</div>
+
+	<!-- ── Add user modal ────────────────────────────────────────────────── -->
+	<div class="modal-backdrop" id="modal-add">
+		<div class="modal">
+			<h2>Add user</h2>
+
+			<div class="field">
+				<label for="add-name">Display name</label>
+				<input type="text" id="add-name" placeholder="e.g. Emma" autocomplete="off" maxlength="40"/>
+				<div class="field-status" id="add-name-status">&nbsp;</div>
+			</div>
+
+			<div class="field">
+				<label>PIN (4 digits)</label>
+				<div class="pin-row" id="add-pin-row">
+					<input maxlength="1" inputmode="numeric"/>
+					<input maxlength="1" inputmode="numeric"/>
+					<input maxlength="1" inputmode="numeric"/>
+					<input maxlength="1" inputmode="numeric"/>
+				</div>
+			</div>
+
+			<div class="field">
+				<label for="add-age">Age range</label>
+				<select id="add-age">
+					<option value="adult" selected>Adult</option>
+					<option value="child_young">Child (6-10)</option>
+					<option value="child_teen">Teen (11-16)</option>
+					<option value="senior">Senior</option>
+				</select>
+			</div>
+
+			<div class="modal-error" id="add-error">&nbsp;</div>
+
+			<div class="modal-actions">
+				<button class="modal-btn" data-close="modal-add">Cancel</button>
+				<button class="modal-btn primary" id="add-submit">Create</button>
+			</div>
+		</div>
+	</div>
+
+	<!-- ── Edit user modal ───────────────────────────────────────────────── -->
+	<div class="modal-backdrop" id="modal-edit">
+		<div class="modal">
+			<h2>Edit user</h2>
+
+			<div class="field">
+				<label for="edit-name">Display name</label>
+				<input type="text" id="edit-name" autocomplete="off" maxlength="40"/>
+				<div class="field-status" id="edit-name-status">&nbsp;</div>
+			</div>
+
+			<div class="field">
+				<label for="edit-age">Age range</label>
+				<select id="edit-age">
+					<option value="adult">Adult</option>
+					<option value="child_young">Child (6-10)</option>
+					<option value="child_teen">Teen (11-16)</option>
+					<option value="senior">Senior</option>
+				</select>
+			</div>
+
+			<div class="field">
+				<label>Change PIN (leave blank to keep current)</label>
+				<div class="pin-row" id="edit-pin-row">
+					<input maxlength="1" inputmode="numeric"/>
+					<input maxlength="1" inputmode="numeric"/>
+					<input maxlength="1" inputmode="numeric"/>
+					<input maxlength="1" inputmode="numeric"/>
+				</div>
+			</div>
+
+			<div class="modal-error" id="edit-error">&nbsp;</div>
+
+			<div class="modal-actions">
+				<button class="modal-btn" data-close="modal-edit">Cancel</button>
+				<button class="modal-btn primary" id="edit-submit">Save</button>
+			</div>
+		</div>
+	</div>
+
+	<script>
+		// ── State ───────────────────────────────────────────────────────
+		let users = [];
+		let currentEditUserId = null;
+		let currentEditOriginalName = "";
+		let nameCheckTimer = null;
+
+		const $ = (id) => document.getElementById(id);
+		const escHtml = (s) => (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
+		                                 .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+		const AGE_LABELS = {
+			adult:       'Adult',
+			child_young: 'Child (6-10)',
+			child_teen:  'Teen (11-16)',
+			senior:      'Senior',
+		};
+
+		function openModal(id)  { $(id).classList.add('open'); }
+		function closeModal(id) { $(id).classList.remove('open'); }
+		document.querySelectorAll('[data-close]').forEach(btn => {
+			btn.addEventListener('click', () => closeModal(btn.dataset.close));
+		});
+
+		// Wire up a 4-box PIN row: auto-advance forward, backspace goes back
+		function wirePinRow(row) {
+			const inputs = row.querySelectorAll('input');
+			inputs.forEach((box, i) => {
+				box.addEventListener('input', () => {
+					box.value = box.value.replace(/\D/g, '').slice(-1);
+					if (box.value && i < inputs.length - 1) inputs[i + 1].focus();
+				});
+				box.addEventListener('keydown', (e) => {
+					if (e.key === 'Backspace' && !box.value && i > 0) inputs[i - 1].focus();
+				});
+			});
+		}
+		function readPin(row)  { return Array.from(row.querySelectorAll('input')).map(b => b.value).join(''); }
+		function clearPin(row) { row.querySelectorAll('input').forEach(b => b.value = ''); }
+
+		wirePinRow($('add-pin-row'));
+		wirePinRow($('edit-pin-row'));
+
+		// ── Load + render ───────────────────────────────────────────────
+		async function load() {
+			const res = await fetch('/user/read');
+			if (res.status === 401) { window.location.href = '/'; return; }
+			users = await res.json();
+			renderList();
+		}
+
+		function renderList() {
+			const list = $('usr-list');
+			list.innerHTML = '';
+			if (!users.length) {
+				list.innerHTML = '<div class="usr-empty">No users configured.</div>';
+				return;
+			}
+
+			// Count active users so we can grey out the deactivate button on the last one
+			const activeCount = users.filter(u => u.active).length;
+
+			for (const u of users) {
+				const meta = [
+					AGE_LABELS[u.age_band] || u.age_band,
+					u.last_login ? `Last login: ${new Date(u.last_login).toLocaleDateString()}` : 'Never signed in',
+				].join(' · ');
+
+				const badges = [];
+				if (!u.active)   badges.push('<span class="usr-badge inactive">Inactive</span>');
+				if (!u.has_pin)  badges.push('<span class="usr-badge no-pin">No PIN</span>');
+
+				const isLastActive   = u.active && activeCount <= 1;
+				const toggleLabel    = u.active ? 'Deactivate' : 'Reactivate';
+				const toggleClass    = u.active ? 'danger'     : 'reactivate';
+				const toggleDisabled = isLastActive ? 'disabled title="Cannot deactivate the last active user"' : '';
+
+				const card = document.createElement('div');
+				card.className = 'usr-card' + (u.active ? '' : ' inactive');
+				card.innerHTML = `
+					<div class="usr-card-body">
+						<div class="usr-name">${escHtml(u.display_id)} ${badges.join(' ')}</div>
+						<div class="usr-meta">${escHtml(meta)}</div>
+					</div>
+					<div class="usr-actions">
+						<button class="usr-action-btn" data-act="edit">Edit</button>
+						<button class="usr-action-btn ${toggleClass}" data-act="toggle" ${toggleDisabled}>${toggleLabel}</button>
+					</div>`;
+				card.querySelector('[data-act="edit"]').addEventListener('click', () => openEdit(u));
+				const toggleBtn = card.querySelector('[data-act="toggle"]');
+				if (!toggleBtn.disabled) {
+					toggleBtn.addEventListener('click', () => toggleActive(u));
+				}
+				list.appendChild(card);
+			}
+		}
+
+		// ── Add user ─────────────────────────────────────────────────────
+		$('usr-add-open').addEventListener('click', () => {
+			$('add-name').value = '';
+			$('add-name-status').textContent = '\u00A0';
+			$('add-name-status').className = 'field-status';
+			clearPin($('add-pin-row'));
+			$('add-age').value = 'adult';
+			$('add-error').textContent = '\u00A0';
+			openModal('modal-add');
+			setTimeout(() => $('add-name').focus(), 60);
+		});
+
+		// Debounced availability check as the user types
+		$('add-name').addEventListener('input', () => {
+			const name = $('add-name').value.trim();
+			const status = $('add-name-status');
+			if (!name) { status.textContent = '\u00A0'; status.className = 'field-status'; return; }
+			status.textContent = 'Checking…'; status.className = 'field-status';
+			clearTimeout(nameCheckTimer);
+			nameCheckTimer = setTimeout(async () => {
+				try {
+					const r = await fetch('/user/check-display-id?name=' + encodeURIComponent(name));
+					const d = await r.json();
+					if (d.available) {
+						status.textContent = '✓ Available';
+						status.className   = 'field-status ok';
+					} else {
+						status.textContent = '✗ Already taken';
+						status.className   = 'field-status bad';
+					}
+				} catch { status.textContent = '\u00A0'; status.className = 'field-status'; }
+			}, 300);
+		});
+
+		$('add-submit').addEventListener('click', async () => {
+			const name    = $('add-name').value.trim();
+			const pin     = readPin($('add-pin-row'));
+			const ageBand = $('add-age').value;
+			const err     = $('add-error');
+
+			if (!name)             { err.textContent = 'Name is required';       return; }
+			if (pin.length !== 4)  { err.textContent = 'PIN must be 4 digits';   return; }
+
+			const res = await fetch('/user/create', {
+				method:  'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body:    JSON.stringify({ display_id: name, pin, age_band: ageBand }),
+			});
+			if (res.ok) {
+				closeModal('modal-add');
+				await load();
+			} else {
+				const data = await res.json().catch(() => ({}));
+				err.textContent = data.error || 'Could not create user';
+			}
+		});
+
+		// ── Edit user ────────────────────────────────────────────────────
+		function openEdit(user) {
+			currentEditUserId       = user.user_id;
+			currentEditOriginalName = user.display_id;
+			$('edit-name').value  = user.display_id;
+			$('edit-age').value   = user.age_band;
+			$('edit-name-status').textContent = '\u00A0';
+			$('edit-name-status').className = 'field-status';
+			clearPin($('edit-pin-row'));
+			$('edit-error').textContent = '\u00A0';
+			openModal('modal-edit');
+			setTimeout(() => $('edit-name').focus(), 60);
+		}
+
+		// Debounced availability check for edit — skips the check if the name
+		// hasn't changed from its original value
+		$('edit-name').addEventListener('input', () => {
+			const name = $('edit-name').value.trim();
+			const status = $('edit-name-status');
+			if (!name) { status.textContent = '\u00A0'; status.className = 'field-status'; return; }
+			if (name.toLowerCase() === currentEditOriginalName.toLowerCase()) {
+				status.textContent = '\u00A0'; status.className = 'field-status'; return;
+			}
+			status.textContent = 'Checking…'; status.className = 'field-status';
+			clearTimeout(nameCheckTimer);
+			nameCheckTimer = setTimeout(async () => {
+				try {
+					const r = await fetch('/user/check-display-id?name=' + encodeURIComponent(name));
+					const d = await r.json();
+					if (d.available) {
+						status.textContent = '✓ Available';
+						status.className   = 'field-status ok';
+					} else {
+						status.textContent = '✗ Already taken';
+						status.className   = 'field-status bad';
+					}
+				} catch { status.textContent = '\u00A0'; status.className = 'field-status'; }
+			}, 300);
+		});
+
+		$('edit-submit').addEventListener('click', async () => {
+			const name    = $('edit-name').value.trim();
+			const pin     = readPin($('edit-pin-row'));
+			const ageBand = $('edit-age').value;
+			const err     = $('edit-error');
+
+			if (!name) { err.textContent = 'Name is required'; return; }
+
+			const body = { display_id: name, age_band: ageBand };
+			if (pin.length === 4) {
+				body.pin = pin;
+			} else if (pin.length > 0) {
+				err.textContent = 'PIN must be exactly 4 digits (or leave blank)';
+				return;
+			}
+
+			const res = await fetch('/user/update/' + encodeURIComponent(currentEditUserId), {
+				method:  'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body:    JSON.stringify(body),
+			});
+			if (res.ok) {
+				closeModal('modal-edit');
+				await load();
+			} else {
+				const data = await res.json().catch(() => ({}));
+				err.textContent = data.error || 'Could not update user';
+			}
+		});
+
+		// ── Toggle active ────────────────────────────────────────────────
+		async function toggleActive(user) {
+			const verb = user.active ? 'deactivate' : 'reactivate';
+			const msg  = user.active
+				? `Deactivate "${user.display_id}"? They will no longer appear on the login page. ` +
+				  `Their conversations and memories are kept and can be restored by reactivating.`
+				: `Reactivate "${user.display_id}"? They will be able to sign in again.`;
+			if (!confirm(msg)) return;
+
+			const res = await fetch('/user/update/' + encodeURIComponent(user.user_id), {
+				method:  'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body:    JSON.stringify({ active: !user.active }),
+			});
+			if (res.ok) {
+				await load();
+			} else {
+				const data = await res.json().catch(() => ({}));
+				alert(`Could not ${verb}: ${data.error || 'unknown error'}`);
+			}
+		}
+
+		load();
+	</script>
+</body>
+</html>
