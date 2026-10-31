@@ -1,1052 +1,381 @@
 #!/usr/bin/env python3
 """
-setup_myai.py
-=============
-Interactive setup wizard for MyAI.
-Run once after cloning the repository, or re-run at any time to reconfigure.
+setup_myai.py — the MyAI setup app.
 
-    python3 setup_myai.py
+Started by ./install.sh, which finds a suitable Python and creates .venv first;
+this runs inside that venv. Re-run it any time to change settings.
 
-Architecture
-------------
-1. DISCOVER	— scan filesystem, detect GPU/hardware, note what is installed
-2. COLLECT 	— walk through screens; each screen populates `config` dict only
-3. CONFIRM 	— show full summary; user approves before anything is written
-4. WRITE   	— single commit: dirs, .env, and first user (via core.db)
-5. SUMMARY 	— show what was created and the start command
+It asks everything up front, shows a review screen, and only then writes the
+settings and does the slow installs. Settings are saved *before* the long engine
+build, so if a build fails, re-running ./install.sh starts from the same answers.
 
-The wizard no longer generates prompts.py or manages a users list — MyAI
-uses core.db.init_db() to create the schema and manages users through the
-Users page in the UI. This script's job is to get you as far as a working
-.env and one usable login account.
+The look lives in installer/tui.py; the machine facts and actions live in
+installer/system.py. This file is just the screens, in order.
 """
 
 from __future__ import annotations
 
-import getpass
-import importlib.util
 import os
-import platform
-import re
-import secrets
-import shutil
-import sqlite3
-import subprocess
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
+from installer import system as S
+from installer.tui import TUI, SHOW_CURSOR
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  Paths  (derived from cwd — nothing is created here)
-# ══════════════════════════════════════════════════════════════════════════════
-CURPATH    = Path.cwd()
-MODELS_DIR = CURPATH / "models"
-DB_DIR     = CURPATH / "instance"
-DB_PATH    = DB_DIR  / "myai.db"
-GEN_DIR    = CURPATH / "generated_files"
+REPO = Path(__file__).resolve().parent
+ENV_PATH = REPO / ".env"
+MODELS_DIR = REPO / "models"
+DB_PATH = REPO / "instance" / "myai.db"
+GEN_DIR = REPO / "generated_files"
+LOG_PATH = REPO / "install.log"
 
-TOTAL_STEPS = 6
+STEPS = 6       # check · model · extras · account · review · install
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  Terminal helpers
-# ══════════════════════════════════════════════════════════════════════════════
-def clear():
-    os.system("cls" if os.name == "nt" else "clear")
+def main() -> int:
+    if not S.in_venv() or not S.python_ok():
+        print("\n  Please start MyAI's setup with ./install.sh — it gets Python ready first.\n")
+        return 1
 
-def draw_header(title: str = "MyAI — Setup Wizard"):
-    print("┌─────────────────────────────────────────────┐")
-    print(f"│  {title:<43}│")
-    print("└─────────────────────────────────────────────┘")
-
-def draw_step(step: int, total: int, title: str, lines: list[str] | None = None):
-    clear()
-    draw_header()
-    print(f"  Step {step} of {total}  ·  {title}")
-    hr()
-    if lines:
-        for line in lines:
-            print(f"  {line}")
-        hr()
-
-def draw_menu(title: str, options: list[str], body_lines: list[str] | None = None, clear_screen: bool = True):
-    if clear_screen:
-        clear()
-    draw_header()
-    print(f"  {title}")
-    hr()
-    if body_lines:
-        for line in body_lines:
-            print(f"  {line}")
-        hr()
-    for i, opt in enumerate(options, 1):
-        print(f"    [{i}]  {opt}")
-    hr()
-
-def hr():
-    print("─────────────────────────────────────────────────")
-
-def prompt(label: str, default: str = "", password: bool = False) -> str:
-    hint = f" [{default}]" if default else ""
-    full = f"  {label}{hint}: "
+    ui = TUI(total_steps=STEPS)
+    existing = S.read_env(ENV_PATH)
+    saved = False
     try:
-        val = getpass.getpass(full) if password else input(full).strip()
-    except (KeyboardInterrupt, EOFError):
-        clear()
-        print("\n  Setup cancelled.")
-        sys.exit(0)
-    return val if val else default
-
-def wait(msg: str = "Press Enter to continue..."):
-    try:
-        input(f"\n  {msg}")
-    except (KeyboardInterrupt, EOFError):
-        sys.exit(0)
-
-def choose(options: list[str]) -> str:
-    while True:
-        try:
-            val = input("  Choice > ").strip()
-        except (KeyboardInterrupt, EOFError):
-            clear()
-            print("  Setup cancelled.")
-            sys.exit(0)
-        if val in [str(i) for i in range(1, len(options) + 1)]:
-            return val
-        print(f"  Invalid choice — enter 1 to {len(options)}")
+        welcome(ui, existing)
+        ram = check_mac(ui)
+        cfg: dict[str, str] = {}
+        choose_model(ui, cfg, existing, ram)
+        choose_extras(ui, cfg, existing)
+        user, remove_placeholder = choose_account(ui)
+        if not review(ui, cfg, user, remove_placeholder, existing):
+            ui.show(["Setup cancelled. Nothing was changed."], wait=False)
+            return 0
+        saved = True
+        return install(ui, cfg, user, remove_placeholder)
+    except KeyboardInterrupt:
+        msg = ("Setup stopped. Your settings are saved — run ./install.sh again to finish."
+               if saved else "Setup cancelled. Nothing was changed.")
+        sys.stdout.write(f"{SHOW_CURSOR}\n\n  {msg}\n\n")
+        return 130
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  Package helpers
-# ══════════════════════════════════════════════════════════════════════════════
-CORE_PACKAGES = ["flask", "waitress", "python-dotenv", "werkzeug", "requests"]
+# ── 0 · Welcome ───────────────────────────────────────────────────────────────
 
-OPTIONAL_PACKAGES: dict[str, tuple[str, str]] = {
-    # import_name: (pip_name, description)
-    "pypdf":             ("pypdf",              "PDF ingestion"),
-    "docx":              ("python-docx",        "Word doc ingestion + generation"),
-    "openpyxl":          ("openpyxl",           "Excel ingestion + generation"),
-    "duckduckgo_search": ("duckduckgo-search",  "Web search"),
-    "bs4":               ("beautifulsoup4",     "Web search — result parsing"),
-    "PIL":               ("Pillow",             "Image skill — manipulation"),
-    "faster_whisper":    ("faster-whisper",     "Voice input — mic transcription"),
-}
-
-def is_installed(package: str) -> bool:
-    return importlib.util.find_spec(package) is not None
-
-def pkg_version(pip_name: str) -> str | None:
-    try:
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "show", pip_name],
-            capture_output=True, text=True,
-        )
-        for line in result.stdout.splitlines():
-            if line.lower().startswith("version:"):
-                return line.split(":", 1)[1].strip()
-    except Exception:
-        pass
-    return None
-
-def pip_install(packages: list[str], extra_env: dict | None = None) -> bool:
-    env = {**os.environ, **(extra_env or {})}
-    cmd = [sys.executable, "-m", "pip", "install", "--quiet"] + packages
-    return subprocess.run(cmd, env=env).returncode == 0
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  Hardware detection
-# ══════════════════════════════════════════════════════════════════════════════
-def detect_gpu() -> tuple[str, str]:
-    system  = platform.system()
-    machine = platform.machine().lower()
-    if system == "Darwin":
-        if "arm" in machine or "aarch64" in machine:
-            return ("macOS Apple Silicon (Metal)", "-DGGML_METAL=on")
-        return ("macOS Intel — CPU only", "")
-    if shutil.which("nvidia-smi"):
-        return ("Linux / Windows — NVIDIA CUDA", "-DGGML_CUDA=on")
-    if shutil.which("rocminfo"):
-        return ("Linux — AMD ROCm", "-DGGML_HIPBLAS=on")
-    return ("CPU only", "")
-
-def has_nvidia() -> bool:
-    return shutil.which("nvidia-smi") is not None
-
-def is_apple_silicon() -> bool:
-    m = platform.machine().lower()
-    return platform.system() == "Darwin" and ("arm" in m or "aarch64" in m)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  PHASE 1 — DISCOVER
-# ══════════════════════════════════════════════════════════════════════════════
-def discover() -> dict:
-    """
-    Scan the environment and return a dict of discovered facts.
-    Nothing is written here — pure observation.
-    """
-    platform_label, cmake_args = detect_gpu()
-
-    gguf_files: list[Path] = []
-    if MODELS_DIR.exists():
-        gguf_files = sorted(MODELS_DIR.glob("*.gguf"))
-
-    # Read existing .env if present (used as defaults throughout collect phase)
-    existing_env: dict[str, str] = {}
-    env_path = CURPATH / ".env"
-    if env_path.exists():
-        for line in env_path.read_text().splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, _, v = line.partition("=")
-                existing_env[k.strip()] = v.strip()
-
-    return {
-        "platform_label": platform_label,
-        "cmake_args":     cmake_args,
-        "gguf_files":     gguf_files,
-        "existing_env":   existing_env,
-        "env_exists":     env_path.exists(),
-        "db_exists":      DB_PATH.exists(),
-        "llama_version":  _get_llama_version(),
-    }
-
-def _get_llama_version() -> str | None:
-    try:
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "show", "llama-cpp-python"],
-            capture_output=True, text=True,
-        )
-        for line in result.stdout.splitlines():
-            if line.lower().startswith("version:"):
-                return line.split(":", 1)[1].strip()
-    except Exception:
-        pass
-    return None
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  PHASE 2 — COLLECT
-# ══════════════════════════════════════════════════════════════════════════════
-
-def screen_welcome(discovery: dict):
-    clear()
-    print()
-    print("  ┌───────────────────────────────────────────┐")
-    print("  │                                           │")
-    print("  │           Welcome to  MyAI  ✦             │")
-    print("  │       Local LLM Chat — Setup Wizard       │")
-    print("  │                                           │")
-    print("  └───────────────────────────────────────────┘")
-    print()
-    print("  This wizard collects all configuration first,")
-    print("  then writes everything in one go at the end.")
-    print("  Safe to re-run — nothing is written until you confirm.")
-    print()
-    print("  Steps:")
-    print("    [1]  Check your Python version")
-    print("    [2]  Install llama-cpp-python (LLM engine)")
-    print("    [3]  Install required packages")
-    print("    [4]  Collect configuration (model, users, skills, voice)")
-    print("    [5]  Set up user PINs")
-    print("    [6]  Generate per-user system prompts")
-    print("    [7]  Review and confirm — then write everything")
-    print()
-
-    if discovery["env_exists"]:
-        print("  ℹ  Existing .env found — current values used as defaults.")
-        print()
-
-    hr()
-    val = prompt("Ready to begin? [Y/n]", default="y")
-    if val.lower() not in ("y", "yes", ""):
-        print("  Setup cancelled.")
-        sys.exit(0)
-
-
-def screen_python():
-    major, minor = sys.version_info[:2]
-    ver = f"{major}.{minor}"
-
-    draw_step(1, TOTAL_STEPS, "Python Version Check", [
-        f"Detected Python {ver}",
-        "Required: Python 3.11 or higher",
-    ])
-
-    if (major, minor) < (3, 11):
-        print(f"  ✘  Python {ver} is too old.")
-        print("     Please upgrade to Python 3.11+ and re-run this script.")
-        sys.exit(1)
-
-    print(f"  ✔  Python {ver} — OK")
-    wait()
-
-
-def screen_llama(discovery: dict):
-    platform_label = discovery["platform_label"]
-    cmake_args     = discovery["cmake_args"]
-    version        = discovery["llama_version"]
-    installed      = version is not None
-
-    clear()
-    draw_header()
-    print(f"  Step 2 of {TOTAL_STEPS}  ·  LLM Engine — llama-cpp-python")
-    hr()
-    print(f"  Platform detected : {platform_label}")
-    print()
-
-    if installed:
-        print(f"  ✔  llama-cpp-python {version} is installed")
-    else:
-        print("  ✘  llama-cpp-python is NOT installed")
-
-    print()
-    if cmake_args:
-        print(f"  Build flags: CMAKE_ARGS=\"{cmake_args}\"")
-    else:
-        print("  Build flags: none (CPU-only build)")
-    print()
-
-    if installed:
-        options = [
-            "Keep current installation",
-            "Re-install / upgrade llama-cpp-python",
-            "Skip — I will manage this manually",
-        ]
-        draw_menu("llama-cpp-python is already installed. What would you like to do?", options)
-        choice = choose(options)
-        if choice == "1":
-            print(f"\n  ✔  Keeping llama-cpp-python {version}")
-            wait()
-            return
-        elif choice == "3":
-            _show_manual_llama_install(cmake_args)
-            return
-    else:
-        options = [
-            "Install llama-cpp-python now  (recommended)",
-            "Skip — I will install it manually",
-        ]
-        draw_menu("llama-cpp-python is required to run MyAI.", options)
-        if choose(options) == "2":
-            _show_manual_llama_install(cmake_args)
-            return
-
-    clear()
-    draw_header()
-    print(f"  Installing llama-cpp-python for {platform_label}...")
-    hr()
-    print("  This may take several minutes. Please wait.")
-    print()
-
-    env = {}
-    if cmake_args:
-        env["CMAKE_ARGS"] = cmake_args
-
-    cmd = [sys.executable, "-m", "pip", "install",
-           "llama-cpp-python", "--force-reinstall", "--no-cache-dir"]
-    result = subprocess.run(cmd, env={**os.environ, **env})
-    print()
-    if result.returncode == 0:
-        new_ver = _get_llama_version() or "unknown"
-        print(f"  ✔  llama-cpp-python {new_ver} installed successfully")
-    else:
-        print("  ✘  Installation failed — see output above.")
-    wait()
-
-def _show_manual_llama_install(cmake_args: str):
-    print()
-    print("  Skipped. To install manually:")
-    if cmake_args:
-        print(f'    CMAKE_ARGS="{cmake_args}" pip install llama-cpp-python --force-reinstall --no-cache-dir')
-    else:
-        print("    pip install llama-cpp-python")
-    wait()
-
-
-def screen_packages():
-    clear()
-    draw_header()
-    print(f"  Step 3 of {TOTAL_STEPS}  ·  Package Installation")
-    hr()
-
-    print("  Core packages  (required)")
-    print()
-    core_missing = []
-    for pip_name in CORE_PACKAGES:
-        ver = pkg_version(pip_name)
-        if ver:
-            print(f"    ✔  {pip_name:<22} {ver}")
-        else:
-            print(f"    ✘  {pip_name:<22} not installed")
-            core_missing.append(pip_name)
-
-    print()
-    print("  Optional packages")
-    print()
-    opt_missing = []
-    for import_name, (pip_name, desc) in OPTIONAL_PACKAGES.items():
-        ver = pkg_version(pip_name)
-        if ver:
-            print(f"    ✔  {pip_name:<22} {ver:<12}  {desc}")
-        else:
-            print(f"    ✘  {pip_name:<22} {'not installed':<12}  {desc}")
-            opt_missing.append(pip_name)
-
-    print()
-    hr()
-    if core_missing:
-        print(f"  {len(core_missing)} core package(s) need installing.")
-    else:
-        print("  ✔  All core packages installed.")
-    if opt_missing:
-        print(f"  {len(opt_missing)} optional package(s) not installed.")
-    else:
-        print("  ✔  All optional packages installed.")
-    print()
-
-    options = [
-        "Install core + all optional packages  (recommended)",
-        "Install core packages only",
-        "Skip — I will install packages manually",
+def welcome(ui: TUI, existing: dict) -> None:
+    ui.step(0, "Welcome")
+    body = [
+        f"Welcome to {ui.bold('MyAI')} — a private AI assistant that runs entirely on "
+        "this Mac.",
+        "Nothing you type ever leaves it.",
+        "",
+        "This setup will:",
+        "  1. Check this Mac is ready",
+        "  2. Help you choose an AI model",
+        "  3. Set up optional extras (weather, voice)",
+        "  4. Create your account",
+        "  5. Install everything — about 5–10 minutes",
+        "",
+        "Nothing is changed until you've reviewed your choices.",
     ]
-    draw_menu("Which packages should be installed?", options, clear_screen=False)
-    choice = choose(options)
-
-    if choice == "3":
-        print("\n  Skipped.")
-        wait()
-        return
-
-    packages = list(CORE_PACKAGES)
-    if choice == "1":
-        packages += [v[0] for v in OPTIONAL_PACKAGES.values()]
-
-    to_install = [p for p in packages if not pkg_version(p)]
-
-    if not to_install:
-        print("\n  ✔  All selected packages already installed — nothing to do.")
-        wait()
-        return
-
-    clear()
-    draw_header()
-    print(f"  Installing {len(to_install)} package(s)...")
-    hr()
-    for p in to_install:
-        print(f"    · {p}")
-    print()
-
-    if pip_install(to_install):
-        print(f"\n  ✔  {len(to_install)} package(s) installed successfully")
-    else:
-        print("\n  ✘  Some packages failed — check output above")
-    wait()
+    if existing:
+        body += ["", ui.dim("Found your existing settings — they'll be the starting answers.")]
+    ui.show(body)
 
 
-def screen_config(discovery: dict, config: dict):
-    """Walk all config sub-screens. Populates config dict only — no disk writes."""
-    existing = discovery["existing_env"]
+# ── 1 · Check this Mac ────────────────────────────────────────────────────────
 
-    def e(key: str, default: str = "") -> str:
-        return existing.get(key, default)
-
-    _collect_model(discovery, config, e)
-    _collect_core(config, e)
-    _collect_weather(config, e)
-    _collect_search(config, e)
-    _collect_whisper(config, e)
-
-
-def _collect_model(discovery: dict, config: dict, e):
-    gguf_files = discovery["gguf_files"]
-
-    clear()
-    draw_header()
-    print(f"  Step 4 of {TOTAL_STEPS}  ·  Model File")
-    hr()
-
-    if gguf_files:
-        print(f"  Found {len(gguf_files)} .gguf file(s) in {MODELS_DIR}:\n")
-        for i, f in enumerate(gguf_files, 1):
-            size_mb = f.stat().st_size / (1024 * 1024)
-            print(f"    [{i}]  {f.name}  ({size_mb:.0f} MB)")
-        print(f"    [{len(gguf_files)+1}]  Enter path manually")
-        print()
-        hr()
-        choice = choose([*[str(f) for f in gguf_files], "manual"])
-        if choice == str(len(gguf_files) + 1):
-            config["MODEL"] = _prompt_model_path(default=e("MODEL", ""))
-        else:
-            config["MODEL"] = str(gguf_files[int(choice) - 1])
-    else:
-        print(f"  No .gguf files found in {MODELS_DIR}/")
-        print()
-        print("  Drop your model file into the models/ directory, or")
-        print("  enter the full path to your .gguf file below.")
-        print()
-        config["MODEL"] = _prompt_model_path(default=e("MODEL", ""))
-
-    print(f"\n  ✔  Model: {config['MODEL']}")
-    wait()
-
-
-def _prompt_model_path(default: str = "") -> str:
+def check_mac(ui: TUI) -> int | None:
+    ui.step(1, "Check this Mac")
+    ram = S.total_ram_bytes()
     while True:
-        val = prompt("Model path", default=default)
-        if not val:
-            print("\n  ✘  Path cannot be empty")
-            wait()
-            continue
-        p = Path(val)
-        if not p.exists():
-            print(f"\n  ✘  File not found: {val}")
-            wait()
-            continue
-        if p.suffix.lower() != ".gguf":
-            print("\n  ✘  Expected a .gguf model file")
-            wait()
-            continue
-        return str(p)
+        v = sys.version_info
+        lines = [ui.ok(f"Python {v.major}.{v.minor}.{v.micro}")]
+        lines.append(ui.ok("Apple Silicon — MyAI can use the GPU") if S.is_apple_silicon()
+                     else ui.warn("Not Apple Silicon — MyAI will run on the CPU (slowly)"))
+        if ram:
+            lines.append(ui.ok(f"{S.gb(ram)} of memory"))
+        if S.has_build_tools():
+            lines.append(ui.ok("Apple's developer tools are installed"))
+            ui.show(lines)
+            return ram
+
+        lines.append(ui.err("Apple's developer tools are missing"))
+        choice = ui.menu(
+            "MyAI needs Apple's free developer tools to build its AI engine.",
+            ["Install Apple's developer tools", "I've installed them — check again",
+             "Quit setup"],
+            intro=lines)
+        if choice == 0:
+            S.request_build_tools()
+            ui.show(["An Apple window should have opened.", "",
+                     "Click Install, accept the licence and wait for it to finish — "
+                     "this can take 5–15 minutes.",
+                     "", "Then come back here and press Enter."])
+        elif choice == 2:
+            raise KeyboardInterrupt
 
 
-def _collect_core(config: dict, e):
-    # CTX_SIZE
+# ── 2 · Choose a model ────────────────────────────────────────────────────────
+
+FIT_LABEL = {"fits": ("fits", "green"), "tight": ("tight fit", "yellow"),
+             "too_big": ("too big", "red")}
+
+
+def choose_model(ui: TUI, cfg: dict, existing: dict, ram: int | None) -> None:
+    ui.step(2, "Choose a model")
+    models = sorted(MODELS_DIR.glob("*.gguf"))
+    current = Path(existing.get("MODEL", "")).expanduser()
+    if current.is_file() and current.resolve() not in [m.resolve() for m in models]:
+        models.append(current)
+
+    fits = [S.model_fit(m.stat().st_size, ram) for m in models]
+    labels = []
+    for m, fit in zip(models, fits):
+        tag = ui.paint(*FIT_LABEL[fit]) if fit else ""
+        labels.append(f"{m.name[:36]:<36} {S.gb(m.stat().st_size):>8}  {tag}")
+    other, later = len(models), len(models) + 1
+    labels += ["Use a model stored somewhere else…", "Skip — I'll add a model later"]
+
+    if models:
+        intro = ["MyAI found these models. "
+                 + (f"This Mac has {S.gb(ram)} of memory; models marked 'fits' "
+                    "will run comfortably." if ram else "")]
+    else:
+        intro = ["No models found yet. A model is the AI's 'brain' — a single .gguf "
+                 "file, usually several GB.",
+                 "", "Download one (Gemma 4 12B at Q5 is a good start for most Macs) "
+                 "and put it in:", f"  {MODELS_DIR}"]
+
+    if current.is_file():
+        default = next(i for i, m in enumerate(models) if m.resolve() == current.resolve())
+    else:
+        default = fits.index("fits") if "fits" in fits else 0
+
     while True:
-        clear()
-        draw_header()
-        print(f"  Step 4 of {TOTAL_STEPS}  ·  Context Window Size")
-        hr()
-        print("  Common values:")
-        print("    8192   — conservative, works on most hardware")
-        print("    12288  — recommended for most models")
-        print("    16384  — large context, needs more VRAM/RAM")
-        print("    32768  — extended context, high VRAM requirement")
-        print()
-        val = prompt("Context size", default=e("CTX_SIZE", "12288"))
-        if not val.isdigit() or int(val) < 2048:
-            print("\n  ✘  Must be a number of at least 2048")
-            wait()
-        else:
-            config["CTX_SIZE"] = val
+        pick = ui.menu("Which model should MyAI use?", labels, default=default, intro=intro)
+        if pick == later:
+            cfg["MODEL"] = ""
             break
-
-    # PORT
-    while True:
-        clear()
-        draw_header()
-        print(f"  Step 4 of {TOTAL_STEPS}  ·  Server Port")
-        hr()
-        val = prompt("Port number", default=e("PORT", "8080"))
-        if not val.isdigit() or not (1024 <= int(val) <= 65535):
-            print("\n  ✘  Must be a number between 1024 and 65535")
-            wait()
+        if pick == other:
+            path = ui.ask("Where is the model file?", default=existing.get("MODEL", ""),
+                          intro=["Type or paste the full path to a .gguf file.",
+                                 ui.dim("Tip: drag the file onto this window to paste its path.")],
+                          validate=lambda v: S.check_model_path(_unquote(v)))
+            chosen = Path(_unquote(path)).expanduser()
+            fit = S.model_fit(chosen.stat().st_size, ram)
         else:
-            config["PORT"] = val
+            chosen, fit = models[pick], fits[pick]
+        if fit == "too_big" and not ui.confirm(
+                "Use it anyway?", default=False,
+                intro=[ui.warn(f"{chosen.name} is bigger than this Mac's GPU can hold."),
+                       "It will probably fail to load, or run very slowly."]):
+            continue
+        cfg["MODEL"] = str(chosen.resolve())
+        break
+
+    rec = S.recommended_ctx(ram)
+    options = [f"{n:>6} tokens — {desc}" + (ui.dim("  (recommended)") if n == rec else "")
+               for n, desc in S.CTX_CHOICES]
+    i = ui.menu("How much should MyAI remember in a conversation?", options,
+                default=S.choice_index(S.CTX_CHOICES, existing.get("CTX_SIZE", rec),
+                                       S.choice_index(S.CTX_CHOICES, rec)),
+                intro=["More memory means longer conversations, but uses more of this "
+                       "Mac's RAM. You can change this later."])
+    cfg["CTX_SIZE"] = S.CTX_CHOICES[i][0]
+
+
+def _unquote(v: str) -> str:
+    # Dragging a file into Terminal pastes it quoted or with escaped spaces.
+    v = v.strip()
+    if len(v) > 1 and v[0] == v[-1] and v[0] in "'\"":
+        v = v[1:-1]
+    return v.replace("\\ ", " ")
+
+
+# ── 3 · Optional extras ───────────────────────────────────────────────────────
+
+def choose_extras(ui: TUI, cfg: dict, existing: dict) -> None:
+    ui.step(3, "Optional extras")
+    e = existing.get
+
+    if ui.confirm("Would you like weather forecasts?", default=bool(e("OWM_API_KEY")),
+                  intro=["MyAI can answer questions like 'Will it rain today?' using "
+                         "OpenWeatherMap.",
+                         "It needs a free API key from openweathermap.org/api — you "
+                         "can add one later by re-running setup."]):
+        cfg["OWM_API_KEY"] = ui.ask("Your OpenWeatherMap API key", default=e("OWM_API_KEY", ""),
+                                    validate=lambda v: None if v else "Please paste your key.")
+        i = ui.menu("Which units?", [f"{u:<9} {d}" for u, d in S.OWM_UNITS],
+                    default=S.choice_index(S.OWM_UNITS, e("OWM_UNITS", "metric")))
+        cfg["OWM_UNITS"] = S.OWM_UNITS[i][0]
+        city = ui.ask("Your home town (optional)", default=e("OWM_HOME_CITY", ""),
+                      intro=["Used when you ask about the weather without saying where.",
+                             "Format: City, country code — e.g. Leeds, GB or Austin, US"])
+        cfg["OWM_HOME_CITY"] = ", ".join(p.strip() for p in city.split(",")) if city else ""
+    else:
+        cfg.update(OWM_API_KEY="", OWM_UNITS=e("OWM_UNITS", "metric"), OWM_HOME_CITY="")
+
+    i = ui.menu("Where should web searches be focused?",
+                [label for _, label in S.SEARCH_REGIONS],
+                default=S.choice_index(S.SEARCH_REGIONS, e("SEARCH_REGION", "wt-wt")))
+    cfg["SEARCH_REGION"] = S.SEARCH_REGIONS[i][0]
+
+    if ui.confirm("Would you like to talk to MyAI using your microphone?",
+                  default=bool(e("WHISPER_MODEL", "base.en")),
+                  intro=["Speech is turned into text on this Mac — nothing is sent anywhere."]):
+        i = ui.menu("Which speech model?", [f"{m:<9} {d}" for m, d in S.WHISPER_MODELS],
+                    default=S.choice_index(S.WHISPER_MODELS, e("WHISPER_MODEL", "base.en"), 1))
+        # faster-whisper has no Metal support; on a Mac, CPU + int8 is the combination that works.
+        cfg.update(WHISPER_MODEL=S.WHISPER_MODELS[i][0], WHISPER_DEVICE="cpu",
+                   WHISPER_COMPUTE="int8")
+    else:
+        cfg.update(WHISPER_MODEL="", WHISPER_DEVICE="", WHISPER_COMPUTE="")
+
+
+# ── 4 · Your account ──────────────────────────────────────────────────────────
+
+def choose_account(ui: TUI) -> tuple[dict | None, bool]:
+    """Returns (first user to create or None, remove the unused 'Setup' account?)."""
+    ui.step(4, "Your account")
+    if S.has_real_users(DB_PATH):
+        intro = ["MyAI already has accounts set up.",
+                 "You can add or change accounts on the Users page once you've signed in."]
+        if S.has_unused_placeholder(REPO, DB_PATH):
+            remove = ui.confirm(
+                "Remove the unused 'Setup' account (PIN 0000)?", default=True,
+                intro=intro + ["", ui.warn("There's also a temporary 'Setup' account left "
+                                           "over from when MyAI was first set up."),
+                               "It isn't needed any more, and anyone who knows its PIN "
+                               "(0000) can sign in with it."])
+            return None, remove
+        ui.show(intro)
+        return None, False
+
+    name = ui.ask("What's your name?", validate=S.check_name,
+                  intro=["This is the first account. You'll sign in with your name and a "
+                         "4-digit PIN.",
+                         "You can add family members later from the Users page."])
+    problem = []
+    while True:
+        pin = ui.ask("Choose a 4-digit PIN", secret=True, validate=S.check_pin, intro=problem)
+        if ui.ask("Type the PIN again", secret=True) == pin:
             break
+        problem = [ui.err("Those PINs didn't match — let's try again.")]
+    i = ui.menu(f"Which age group is {name} in?", [label for _, label in S.AGE_BANDS],
+                intro=["MyAI adjusts its tone to suit. You can change this later."])
+    return {"name": name, "pin": pin, "age_band": S.AGE_BANDS[i][0]}, False
 
 
-def _collect_weather(config: dict, e):
-    clear()
-    draw_header()
-    print(f"  Step 4 of {TOTAL_STEPS}  ·  Weather Skill (optional)")
-    hr()
-    print("  The weather skill uses OpenWeatherMap (free tier).")
-    print("  Get a free API key at: https://openweathermap.org/api")
-    print("  Press Enter to skip — weather skill will be disabled.")
-    print()
+# ── 5 · Review ────────────────────────────────────────────────────────────────
 
-    existing_key = e("OWM_API_KEY", "")
-    if existing_key:
-        print(f"  Existing key found: {existing_key[:8]}...")
-        print()
-
-    owm_key = prompt("OpenWeatherMap API key", default=existing_key)
-
-    if owm_key:
-        config["OWM_API_KEY"] = owm_key
-
-        options = ["metric  (°C, m/s)", "imperial  (°F, mph)", "standard  (K, m/s)"]
-        draw_menu(f"Step 4 of {TOTAL_STEPS}  ·  Temperature Units", options)
-        config["OWM_UNITS"] = ["metric", "imperial", "standard"][int(choose(options)) - 1]
-
-        clear()
-        draw_header()
-        print(f"  Step 4 of {TOTAL_STEPS}  ·  Home Location (optional)")
-        hr()
-        print("  Default city for queries like 'Will it rain today?'")
-        print("  Format: City, CC  (e.g. Leeds, GB  or  New York, US)")
-        print("  Press Enter to skip.")
-        print()
-        home_city = prompt("Home city", default=e("OWM_HOME_CITY", ""))
-        if home_city and "," in home_city and ", " not in home_city:
-            home_city = home_city.replace(",", ", ")
-        config["OWM_HOME_CITY"] = home_city
-    else:
-        config["OWM_API_KEY"]   = ""
-        config["OWM_UNITS"]     = e("OWM_UNITS", "metric")
-        config["OWM_HOME_CITY"] = e("OWM_HOME_CITY", "")
-
-
-def _collect_search(config: dict, e):
-    existing_region = e("SEARCH_REGION", "wt-wt")
-    options = [
-        "wt-wt   — worldwide (default)",
-        "uk-en   — United Kingdom",
-        "us-en   — United States",
-        "de-de   — Germany",
-        "fr-fr   — France",
-        "jp-jp   — Japan",
-        "cn-zh   — China",
-    ]
-    region_codes = ["wt-wt", "uk-en", "us-en", "de-de", "fr-fr", "jp-jp", "cn-zh"]
-    current_label = next((o for o in options if o.startswith(existing_region)), options[0])
-    draw_menu(
-        f"Step 4 of {TOTAL_STEPS}  ·  Web Search Region",
-        options,
-        body_lines=[f"Current: {current_label}"],
-    )
-    config["SEARCH_REGION"] = region_codes[int(choose(options)) - 1]
-
-
-def _collect_whisper(config: dict, e):
-    clear()
-    draw_header()
-    print(f"  Step 4 of {TOTAL_STEPS}  ·  Voice Input (optional)")
-    hr()
-    print("  MyAI supports a mic button for voice input, transcribed")
-    print("  locally via faster-whisper — no cloud, no API key.")
-    print()
-
-    if is_installed("faster_whisper"):
-        print("  ✔  faster-whisper is installed")
-    else:
-        print("  ✘  faster-whisper is not installed")
-        print("     Install it with:  pip install faster-whisper")
-    print()
-
-    draw_menu(f"Step 4 of {TOTAL_STEPS}  ·  Voice Input", [
-        "Configure voice input",
-        "Skip — disable voice input",
-    ])
-
-    if choose(["Configure voice input", "Skip"]) == "2":
-        config["WHISPER_MODEL"]   = ""
-        config["WHISPER_DEVICE"]  = ""
-        config["WHISPER_COMPUTE"] = ""
-        return
-
-    # Device
-    clear()
-    draw_header()
-    print(f"  Step 4 of {TOTAL_STEPS}  ·  Voice Input — Hardware")
-    hr()
-
-    if is_apple_silicon():
-        print("  ⚠  Apple Silicon detected.")
-        print("     CTranslate2 does not support Metal — CPU will be used.")
-        print()
-
-    device_options = ["cpu  — works on any machine (recommended default)"]
-    device_map     = {"1": "cpu"}
-    if has_nvidia():
-        device_options.append("cuda  — NVIDIA GPU (faster)")
-        device_map["2"] = "cuda"
-
-    draw_menu("Select transcription device:", device_options)
-    device = device_map[choose(device_options)]
-    config["WHISPER_DEVICE"] = device
-
-    # Compute type
-    clear()
-    draw_header()
-    print(f"  Step 4 of {TOTAL_STEPS}  ·  Voice Input — Compute Type")
-    hr()
-
-    if device == "cuda":
-        print("  CUDA selected — float16 is recommended.")
-        print()
-        compute_options = ["float16  — recommended for CUDA", "int8  — smaller, slightly faster"]
-        compute_map     = {"1": "float16", "2": "int8"}
-    else:
-        print("  CPU selected — int8 is required.")
-        print("  ⚠  float16 is NOT supported on CPU and will crash the app.")
-        print()
-        compute_options = ["int8  — required for CPU"]
-        compute_map     = {"1": "int8"}
-
-    draw_menu("Select compute type:", compute_options)
-    config["WHISPER_COMPUTE"] = compute_map[choose(compute_options)]
-
-    # Model size
-    clear()
-    draw_header()
-    print(f"  Step 4 of {TOTAL_STEPS}  ·  Voice Input — Model Size")
-    hr()
-    print("  Model       Size      Speed (CPU)   Accuracy")
-    print("  ──────────  ────────  ────────────  ────────────")
-    print("  tiny.en      ~39 MB   Fastest       Good")
-    print("  base.en     ~145 MB   Fast          Better   ← recommended")
-    print("  small.en    ~244 MB   Moderate      Great")
-    print("  medium.en   ~769 MB   Slow          Excellent")
-    print()
-    print("  Downloaded once on first use, then cached locally.")
-    print()
-
-    model_options = ["tiny.en", "base.en   (recommended)", "small.en", "medium.en"]
-    model_map     = {"1": "tiny.en", "2": "base.en", "3": "small.en", "4": "medium.en"}
-    draw_menu("Select Whisper model:", model_options)
-    config["WHISPER_MODEL"] = model_map[choose(model_options)]
-
-
-def screen_first_user(config: dict):
-    """
-    Collect one first user (display name, PIN, age band) — if and only if
-    the DB has no users yet. Stored in config['_first_user'] and not written
-    until commit.
-
-    Skipped entirely if the DB already contains users, matching the "DB is
-    the source of truth" principle. On existing installs, the wizard just
-    updates .env and leaves users alone.
-    """
-    # Skip if the DB already has users
-    if _db_has_users():
-        config["_first_user"] = None
-        clear()
-        draw_header()
-        print(f"  Step 5 of {TOTAL_STEPS}  ·  Users")
-        hr()
-        print("  Existing users detected in the database — skipping first-user setup.")
-        print("  Manage users via the Users page in the app after login.")
-        print()
-        wait()
-        return
-
-    # Collect display name
+def review(ui: TUI, cfg: dict, user: dict | None, remove_placeholder: bool,
+           existing: dict) -> bool:
+    ui.step(5, "Review")
+    cfg.update(PORT=existing.get("PORT", S.DEFAULT_PORT), MYAIDB=str(DB_PATH),
+               FILE_OUTPUT_DIR=str(GEN_DIR), WARMUP=existing.get("WARMUP", "1"))
+    label = lambda choices, v: dict(choices).get(v, v)
     while True:
-        clear()
-        draw_header()
-        print(f"  Step 5 of {TOTAL_STEPS}  ·  Create Your First User")
-        hr()
-        print("  Set up the first user account so you can sign in after install.")
-        print("  Add more users later via the Users page in the app.")
-        print()
-        display_id = prompt("Display name (e.g. 'George')").strip()
-        if not display_id:
-            print("\n  ✘  A display name is required")
-            wait()
-            continue
-        if len(display_id) > 40:
-            print("\n  ✘  Display name too long (max 40 characters)")
-            wait()
-            continue
-        break
-
-    # Collect PIN + confirmation
-    while True:
-        clear()
-        draw_header()
-        print(f"  Step 5 of {TOTAL_STEPS}  ·  User PIN")
-        hr()
-        print(f"  Setting a 4-digit PIN for '{display_id}'.")
-        print()
-
-        pin = prompt("4-digit PIN", password=True)
-        if not re.fullmatch(r"\d{4}", pin):
-            print("\n  ✘  PIN must be exactly 4 digits")
-            wait()
-            continue
-
-        confirm = prompt("Confirm PIN", password=True)
-        if pin != confirm:
-            print("\n  ✘  PINs do not match — try again")
-            wait()
-            continue
-        break
-
-    # Choose age band with a nice menu
-    age_options = [
-        ("adult",       "Adult"),
-        ("child_young", "Child (6-10)"),
-        ("child_teen",  "Teen (11-16)"),
-        ("senior",      "Senior"),
-    ]
-    while True:
-        clear()
-        draw_header()
-        print(f"  Step 5 of {TOTAL_STEPS}  ·  Age Band")
-        hr()
-        print(f"  Choose an age band for '{display_id}'.")
-        print("  This picks an age-appropriate system prompt style. You can change")
-        print("  it later via the Users page.")
-        print()
-        for i, (_, label) in enumerate(age_options, 1):
-            print(f"    {i}) {label}")
-        print()
-        pick = prompt("Enter a number (1-4)", default="1").strip()
-        if not pick.isdigit() or not (1 <= int(pick) <= len(age_options)):
-            print(f"\n  ✘  Enter a number between 1 and {len(age_options)}")
-            wait()
-            continue
-        age_band, _ = age_options[int(pick) - 1]
-        break
-
-    config["_first_user"] = {
-        "display_id": display_id,
-        "pin":        pin,
-        "age_band":   age_band,
-    }
+        rows = [
+            ("Model", Path(cfg["MODEL"]).name if cfg["MODEL"] else ui.warn("none yet — add one later")),
+            ("Conversation memory", f"{cfg['CTX_SIZE']} tokens"),
+            ("Weather", f"on — {cfg['OWM_HOME_CITY'] or 'no home town'}" if cfg["OWM_API_KEY"] else "off"),
+            ("Web search", label(S.SEARCH_REGIONS, cfg["SEARCH_REGION"])),
+            ("Voice input", f"on — {cfg['WHISPER_MODEL']}" if cfg["WHISPER_MODEL"] else "off"),
+            ("Account", f"{user['name']} ({label(S.AGE_BANDS, user['age_band'])})" if user
+             else "keeping your existing accounts"
+             + (", removing 'Setup'" if remove_placeholder else "")),
+            ("Address", f"http://localhost:{cfg['PORT']}"),
+        ]
+        body = [f"{ui.dim(f'{k}:'.ljust(21))} {v}" for k, v in rows]
+        body += ["", "Setup will now save these settings and install MyAI's components.",
+                 "Building the AI engine is the slow part — about 5–10 minutes."]
+        choice = ui.menu("Ready?", ["Install MyAI",
+                                    f"Change the port (advanced — now {cfg['PORT']})",
+                                    "Cancel — leave everything as it was"], intro=body)
+        if choice == 0:
+            return True
+        if choice == 2:
+            return False
+        cfg["PORT"] = ui.ask("Which port should MyAI use?", default=cfg["PORT"],
+                             validate=S.check_port,
+                             intro=["Only change this if something else on this Mac already "
+                                    "uses port 8080."])
 
 
-def _db_has_users() -> bool:
-    """
-    True if the SQLite DB exists AND already has at least one row in `users`.
-    Used to skip first-user creation on re-runs of the wizard.
-    """
-    if not DB_PATH.exists():
-        return False
-    try:
-        with sqlite3.connect(DB_PATH) as conn:
-            # Users table might not exist yet on a partially-initialised DB
-            row = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='users'"
-            ).fetchone()
-            if not row:
-                return False
-            return conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] > 0
-    except sqlite3.DatabaseError:
-        return False
+# ── 6 · Install ───────────────────────────────────────────────────────────────
 
+def install(ui: TUI, cfg: dict, user: dict | None, remove_placeholder: bool) -> int:
+    ui.step(6, "Installing")
+    done: list[str] = []
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  PHASE 3 — CONFIRM
-# ══════════════════════════════════════════════════════════════════════════════
-def screen_confirm(config: dict) -> bool:
-    clear()
-    draw_header()
-    print(f"  Step 6 of {TOTAL_STEPS}  ·  Review & Confirm")
-    hr()
-    print("  Everything below will be written to disk.\n")
-
-    print("  .env settings")
-    rows = [
-        ("MODEL",          config.get("MODEL", "")),
-        ("CTX_SIZE",       config.get("CTX_SIZE", "")),
-        ("PORT",           config.get("PORT", "")),
-        ("MYAIDB",         str(DB_PATH)),
-        ("FILE_OUTPUT_DIR",str(GEN_DIR)),
-        ("OWM_API_KEY",    (config.get("OWM_API_KEY", "")[:8] + "...") if config.get("OWM_API_KEY") else "(disabled)"),
-        ("OWM_UNITS",      config.get("OWM_UNITS", "")),
-        ("OWM_HOME_CITY",  config.get("OWM_HOME_CITY", "") or "(not set)"),
-        ("SEARCH_REGION",  config.get("SEARCH_REGION", "")),
-        ("WHISPER_MODEL",  config.get("WHISPER_MODEL", "") or "(disabled)"),
-        ("WHISPER_DEVICE", config.get("WHISPER_DEVICE", "") or "(disabled)"),
-        ("WHISPER_COMPUTE",config.get("WHISPER_COMPUTE", "") or "(disabled)"),
-    ]
-    for k, v in rows:
-        print(f"    {k:<22} {v}")
-
-    first_user = config.get("_first_user")
-    print()
-    if first_user:
-        print("  First user")
-        print(f"    Display name:   {first_user['display_id']}")
-        print(f"    PIN:            (set ✔)")
-        print(f"    Age band:       {first_user['age_band']}")
-    else:
-        print("  First user")
-        print("    (skipped — existing users already in the database)")
-
-    print()
-    print("  Files that will be created / updated:")
-    print("    · .env")
-    print("    · instance/myai.db       (schema created via core.db.init_db — safe to re-run)")
-
-    print()
-    hr()
-    draw_menu("Ready to write?", [
-        "Write everything and finish  ✔",
-        "Cancel — exit without writing anything",
-    ])
-    return choose(["write", "cancel"]) == "1"
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  PHASE 4 — WRITE  (single commit)
-# ══════════════════════════════════════════════════════════════════════════════
-def commit(config: dict):
-    clear()
-    draw_header()
-    print("  Writing files...")
-    hr()
-
-    # 1 — Directories
-    for d in [DB_DIR, GEN_DIR, MODELS_DIR]:
+    for d in (DB_PATH.parent, GEN_DIR, MODELS_DIR):
         d.mkdir(parents=True, exist_ok=True)
-        print(f"  ✔  {d}")
+    S.write_env(ENV_PATH, cfg)
+    done.append(ui.ok("Settings saved"))
 
-    for folder, label in [(MODELS_DIR, "models/.gitkeep"), (DB_DIR, "instance/.gitkeep")]:
-        gk = folder / ".gitkeep"
-        if not gk.exists():
-            gk.touch()
+    ok, error = S.setup_database(REPO, DB_PATH, user, remove_placeholder)
+    if not ok:
+        return _failed(ui, done, "Couldn't set up the database.", [error])
+    done.append(ui.ok(f"Account '{user['name']}' created" if user else "Database ready"))
+    if remove_placeholder:
+        done.append(ui.ok("Unused 'Setup' account removed"))
 
-    # 2 — .env
-    secret_key = secrets.token_hex(32)
-    # Preserve existing secret key if re-running
-    existing_sk = (CURPATH / ".env")
-    if existing_sk.exists():
-        for line in existing_sk.read_text().splitlines():
-            if line.startswith("SECRET_KEY="):
-                existing_sk_val = line.partition("=")[2].strip()
-                if existing_sk_val:
-                    secret_key = existing_sk_val
-                break
-
-    env_lines = [
-        "# MyAI configuration — generated by setup_myai.py",
-        "# Do NOT commit this file to version control.",
-        "",
-        f"MODEL={config['MODEL']}",
-        f"CTX_SIZE={config['CTX_SIZE']}",
-        f"PORT={config['PORT']}",
-        f"MYAIDB={DB_PATH}",
-        f"FILE_OUTPUT_DIR={GEN_DIR}",
-        f"SECRET_KEY={secret_key}",
-        f"WARMUP=1",
-        "",
-        "# Weather skill (optional — leave blank to disable)",
-        f"OWM_API_KEY={config.get('OWM_API_KEY', '')}",
-        f"OWM_UNITS={config.get('OWM_UNITS', 'metric')}",
-        f"OWM_HOME_CITY={config.get('OWM_HOME_CITY', '')}",
-        "",
-        "# Web search",
-        f"SEARCH_REGION={config.get('SEARCH_REGION', 'wt-wt')}",
-        "",
-        "# Voice input — faster-whisper (leave blank to disable)",
-        f"WHISPER_MODEL={config.get('WHISPER_MODEL', '')}",
-        f"WHISPER_DEVICE={config.get('WHISPER_DEVICE', '')}",
-        f"WHISPER_COMPUTE={config.get('WHISPER_COMPUTE', '')}",
-    ]
-    (CURPATH / ".env").write_text("\n".join(env_lines) + "\n")
-    print("  ✔  .env")
-
-    # 3 — SQLite schema
-    # We delegate to core.db.init_db() so the schema, migrations, and any
-    # future changes live in exactly one place. MYAIDB must point at the
-    # right location — set it explicitly before importing.
-    os.environ["MYAIDB"] = str(DB_PATH)
-
-    # Ensure the project root is importable even when the wizard is run
-    # from a subdirectory or via an absolute path.
-    if str(CURPATH) not in sys.path:
-        sys.path.insert(0, str(CURPATH))
-
-    try:
-        from core.db import init_db, create_user, list_users
-    except ImportError as e:
-        print(f"  ✘  Could not import core.db: {e}")
-        print("     Make sure you're running this from the MyAI project root.")
-        sys.exit(1)
-
-    init_db()
-    print(f"  ✔  instance/myai.db (schema ready)")
-
-    # 4 — First user (only if the wizard collected one)
-    first_user = config.get("_first_user")
-    if first_user:
-        # Guard: db.init_db() may have created a bootstrap "Setup" user on a
-        # totally fresh DB. If we now go and create ANOTHER user, we'd end up
-        # with two on install. Remove the bootstrap if it exists AND has the
-        # default PIN AND we're about to create a real user.
-        existing = list_users(include_inactive=True)
-        bootstrap = next(
-            (u for u in existing if u["display_id"] == "Setup" and u["has_pin"]),
-            None,
-        )
-        if bootstrap:
-            # Directly remove — no memories or conversations exist yet
-            with sqlite3.connect(DB_PATH) as conn:
-                conn.execute("DELETE FROM users WHERE user_id = ?", (bootstrap["user_id"],))
-
-        try:
-            create_user(
-                first_user["display_id"],
-                first_user["pin"],
-                first_user["age_band"],
-            )
-            print(f"  ✔  Created user '{first_user['display_id']}' ({first_user['age_band']})")
-        except ValueError as e:
-            print(f"  ✘  Could not create user: {e}")
-            print("     You can create users via the Users page after signing in.")
+    have = S.installed_version(S.LLAMA_PACKAGE)
+    if have == S.LLAMA_VERSION:
+        done.append(ui.ok("AI engine already installed"))
     else:
-        # Existing DB with existing users — leave them alone
-        print(f"  ·  Users left unchanged")
+        r = ui.run(done + ["", "Building the AI engine for this Mac.",
+                           "This is the slow part — usually 5–10 minutes. "
+                           "Time for a cuppa.", "",
+                           ui.dim(f"Details are written to {LOG_PATH.name}")],
+                   "Building the AI engine", S.llama_install_cmd(), LOG_PATH,
+                   env=S.build_env(os.environ, S.is_apple_silicon()))
+        if not r.ok:
+            return _failed(ui, done, "The AI engine didn't build.", r.tail)
+        done.append(ui.ok("AI engine built"))
 
-    print()
-    hr()
+    req = S.requirements_file(REPO)
+    try:
+        r = ui.run(done + ["", "Installing the rest of MyAI's components…"],
+                   "Installing components", S.requirements_cmd(req), LOG_PATH)
+    finally:
+        req.unlink(missing_ok=True)
+    if not r.ok:
+        return _failed(ui, done, "Some components didn't install.", r.tail)
+    done.append(ui.ok("Components installed"))
+
+    r = ui.run(done + ["", "Checking everything works…"], "Checking the AI engine",
+               S.engine_check_cmd(), LOG_PATH)
+    if not r.ok:
+        return _failed(ui, done, "The AI engine is installed but won't start.", r.tail)
+    gpu = "gpu" in r.tail
+    done.append(ui.ok("AI engine uses the GPU") if gpu
+                else ui.warn("AI engine will run on the CPU only (slower)"))
+
+    ui.step(STEPS, "All done")
+    body = done + ["", ui.bold("MyAI is ready."), ""]
+    if not cfg["MODEL"]:
+        body += [ui.warn("One thing left: add a model."),
+                 f"Put a .gguf file in {MODELS_DIR.name}/ and run ./install.sh again "
+                 "to choose it.", ""]
+    body += ["To start MyAI, run this in the MyAI folder:", "",
+             "    " + ui.paint(".venv/bin/python app.py", "cyan"), "",
+             f"Then open http://localhost:{cfg['PORT']} in your browser"
+             + (f" and sign in as {user['name']}." if user else ".")]
+    ui.show(body, wait=False)
+    return 0
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  PHASE 5 — SUMMARY
-# ══════════════════════════════════════════════════════════════════════════════
-def screen_summary(config: dict):
-    clear()
-    print()
-    print("  ┌───────────────────────────────────────────┐")
-    print("  │           Setup Complete  ✔               │")
-    print("  └───────────────────────────────────────────┘")
-    print()
-    print("  Optional packages")
-    print("  ─────────────────────────────────────────────")
-    for import_name, (pip_name, desc) in OPTIONAL_PACKAGES.items():
-        status = "✔  installed" if is_installed(import_name) else "✘  not installed"
-        print(f"    {status:<18}  {pip_name:<22}  {desc}")
-    print()
-    print("  ┌───────────────────────────────────────────┐")
-    print("  │  Start MyAI:                              │")
-    print("  │                                           │")
-    print("  │    python3 app.py                         │")
-    print("  │                                           │")
-    print(f"  │  Then open:  http://localhost:{config['PORT']:<14} │")
-    print("  │                                           │")
-    print("  │  To reconfigure, re-run:                  │")
-    print("  │    python3 setup_myai.py                  │")
-    print("  └───────────────────────────────────────────┘")
-    print()
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  Main
-# ══════════════════════════════════════════════════════════════════════════════
-def main():
-    # Phase 1 — Discover (read-only)
-    discovery = discover()
-
-    # Phase 2 — Collect (memory only)
-    config: dict = {}
-    screen_welcome(discovery)
-    screen_python()
-    screen_llama(discovery)
-    screen_packages()
-    screen_config(discovery, config)
-    screen_first_user(config)
-
-    # Phase 3 — Confirm
-    if not screen_confirm(config):
-        clear()
-        print()
-        print("  Setup cancelled — nothing was written.")
-        print()
-        sys.exit(0)
-
-    # Phase 4 — Write (single commit)
-    commit(config)
-
-    # Phase 5 — Summary
-    screen_summary(config)
+def _failed(ui: TUI, done: list[str], what: str, tail: list[str]) -> int:
+    body = done + ["", ui.err(what), ""]
+    if any(tail):
+        body += [ui.dim("Last lines of the log:")] + [ui.dim("  " + l) for l in tail] + [""]
+    body += [f"Full details: {LOG_PATH}",
+             "Your settings are saved. Once the problem is fixed, run ./install.sh "
+             "again — it picks up where it left off."]
+    ui.show(body, wait=False)
+    return 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

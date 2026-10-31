@@ -398,12 +398,18 @@ def user_create():
     if not pin:
         return json.dumps({"error": "pin is required"}), 400
 
+    signed_in_user_existed = get_user_by_id(session["user_id"]) is not None
     try:
         new_id = create_user(display_id, pin, age_band)
     except ValueError as e:
         return json.dumps({"error": str(e)}), 400
 
     user = get_user_by_id(new_id)
+    # Creating the first real account removes the 'Setup' placeholder. If that's
+    # who is signed in, end the session now — it points at a user that's gone.
+    if signed_in_user_existed and get_user_by_id(session["user_id"]) is None:
+        session.clear()
+        return json.dumps({"ok": True, "signed_out": True, **user})
     return json.dumps({"ok": True, **user})
 
 

@@ -221,7 +221,7 @@ def _migrate_users_to_uuid():
             conn.execute(
                 """INSERT INTO users(user_id, display_id, pin, age_band, active, created_at)
                    VALUES (?, ?, ?, 'adult', 1, ?)""",
-                (new_id, "Setup", "0000", _now()),
+                (new_id, BOOTSTRAP_DISPLAY_ID, BOOTSTRAP_PIN, _now()),
             )
             print("[db] No users found — created bootstrap user 'Setup' with PIN 0000.")
             print("[db] Sign in, then rename this user and change the PIN via the Users page.")
@@ -308,10 +308,49 @@ def count_active_users() -> int:
         ).fetchone()[0]
 
 
+# The placeholder init_db() creates on an empty DB. It's "untouched" while it's
+# still called Setup, still has PIN 0000 and owns no data — and it should go as
+# soon as a real account exists, or anyone can sign in with 0000.
+BOOTSTRAP_DISPLAY_ID = "Setup"
+BOOTSTRAP_PIN = "0000"
+
+
+def untouched_bootstrap_id() -> str | None:
+    """
+    The placeholder's user_id if it's untouched AND another active user exists
+    (so removing it can never leave nobody able to sign in); otherwise None.
+    """
+    with get_conn() as conn:
+        row = conn.execute(
+            """SELECT u.user_id FROM users u
+               WHERE u.display_id = ? AND u.pin = ?
+                 AND NOT EXISTS (SELECT 1 FROM conversations c WHERE c.user_id = u.user_id)
+                 AND NOT EXISTS (SELECT 1 FROM user_memories m WHERE m.user_id = u.user_id)
+                 AND NOT EXISTS (SELECT 1 FROM file_context  f WHERE f.user_id = u.user_id)
+                 AND EXISTS (SELECT 1 FROM users o
+                             WHERE o.user_id != u.user_id AND o.active = 1)""",
+            (BOOTSTRAP_DISPLAY_ID, BOOTSTRAP_PIN),
+        ).fetchone()
+    return row["user_id"] if row else None
+
+
+def remove_untouched_bootstrap() -> str | None:
+    """Delete the untouched placeholder, if there is one. Returns its user_id."""
+    user_id = untouched_bootstrap_id()
+    if user_id:
+        with get_conn() as conn:
+            conn.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+    return user_id
+
+
 def create_user(display_id: str, pin: str, age_band: str = "adult") -> str:
     """
     Create a new user. Returns the new user_id (UUID).
     Raises ValueError if display_id is already taken or age_band is invalid.
+
+    Creating the first real account also removes the untouched 'Setup'
+    placeholder (see remove_untouched_bootstrap). Callers signed in as that
+    placeholder must check their session user still exists afterwards.
     """
     display_id = (display_id or "").strip()
     if not display_id:
@@ -328,6 +367,7 @@ def create_user(display_id: str, pin: str, age_band: str = "adult") -> str:
                VALUES (?, ?, ?, ?, 1, ?)""",
             (new_id, display_id, pin, age_band, _now()),
         )
+    remove_untouched_bootstrap()
     return new_id
 
 

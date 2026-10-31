@@ -448,6 +448,13 @@
 				body:    JSON.stringify({ display_id: name, pin, age_band: ageBand }),
 			});
 			if (res.ok) {
+				const data = await res.json().catch(() => ({}));
+				if (data.signed_out) {
+					// The temporary 'Setup' account was removed — sign in as the new user.
+					alert(`The temporary 'Setup' account has been removed. Please sign in as ${name}.`);
+					window.location.href = '/';
+					return;
+				}
 				closeModal('modal-add');
 				await load();
 			} else {
