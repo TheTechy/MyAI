@@ -23,7 +23,7 @@ import json
 
 import pytest
 
-from helpers import event_names, parse_sse, token_text
+from helpers import TEST_USER_ID, event_names, parse_sse, token_text
 
 
 # ── /auth ──────────────────────────────────────────────────────────────────────
@@ -50,11 +50,11 @@ class TestAuth:
 class TestUnauthenticated:
 
     def test_conversations_list_requires_auth(self, client):
-        r = client.get("/conversations/testuser")
+        r = client.get(f"/conversations/{TEST_USER_ID}")
         assert r.status_code == 401
 
     def test_new_conversation_requires_auth(self, client):
-        r = client.post("/conversations", json={"user_id": "testuser"})
+        r = client.post("/conversations", json={"user_id": TEST_USER_ID})
         assert r.status_code == 401
 
     def test_delete_conversation_requires_auth(self, client):
@@ -84,10 +84,10 @@ class TestLogout:
     def test_logout_clears_session(self, flask_app):
         with flask_app.test_client() as c:
             with c.session_transaction() as sess:
-                sess["user_id"] = "testuser"
+                sess["user_id"] = TEST_USER_ID
             c.get("/logout")
             # After logout, /conversations should require auth again
-            r = c.get("/conversations/testuser")
+            r = c.get(f"/conversations/{TEST_USER_ID}")
             assert r.status_code == 401
 
 
@@ -95,52 +95,58 @@ class TestLogout:
 class TestConversations:
 
     def test_create_conversation_returns_conv_id(self, auth_client):
-        r = auth_client.post("/conversations", json={"user_id": "testuser"})
+        r = auth_client.post("/conversations", json={"user_id": TEST_USER_ID})
         assert r.status_code == 200
         body = json.loads(r.data)
         assert "conv_id" in body
         assert len(body["conv_id"]) == 36  # UUID
 
-    def test_create_conversation_missing_user_id(self, auth_client):
-        r = auth_client.post("/conversations", json={})
-        assert r.status_code == 400
+    def test_create_conversation_belongs_to_signed_in_user(self, auth_client):
+        # The session decides the owner; a user_id in the body is ignored, so
+        # nobody can create conversations in someone else's name.
+        for body in ({}, {"user_id": "00000000-0000-4000-8000-0000000000ff"}):
+            r = auth_client.post("/conversations", json=body)
+            assert r.status_code == 200
+            conv_id = json.loads(r.data)["conv_id"]
+            mine = json.loads(auth_client.get(f"/conversations/{TEST_USER_ID}").data)
+            assert conv_id in [c["conv_id"] for c in mine]
 
     def test_list_conversations_returns_list(self, auth_client):
-        auth_client.post("/conversations", json={"user_id": "testuser"})
-        r = auth_client.get("/conversations/testuser")
+        auth_client.post("/conversations", json={"user_id": TEST_USER_ID})
+        r = auth_client.get(f"/conversations/{TEST_USER_ID}")
         assert r.status_code == 200
         assert isinstance(json.loads(r.data), list)
 
     def test_created_conversation_appears_in_list(self, auth_client):
-        r = auth_client.post("/conversations", json={"user_id": "testuser"})
+        r = auth_client.post("/conversations", json={"user_id": TEST_USER_ID})
         conv_id = json.loads(r.data)["conv_id"]
-        r2 = auth_client.get("/conversations/testuser")
+        r2 = auth_client.get(f"/conversations/{TEST_USER_ID}")
         ids = [c["conv_id"] for c in json.loads(r2.data)]
         assert conv_id in ids
 
     def test_delete_conversation(self, auth_client):
-        r = auth_client.post("/conversations", json={"user_id": "testuser"})
+        r = auth_client.post("/conversations", json={"user_id": TEST_USER_ID})
         conv_id = json.loads(r.data)["conv_id"]
         rd = auth_client.delete(f"/conversations/{conv_id}")
         assert rd.status_code == 200
         assert json.loads(rd.data)["deleted"] == conv_id
-        ids = [c["conv_id"] for c in json.loads(auth_client.get("/conversations/testuser").data)]
+        ids = [c["conv_id"] for c in json.loads(auth_client.get(f"/conversations/{TEST_USER_ID}").data)]
         assert conv_id not in ids
 
     def test_get_messages_returns_list(self, auth_client):
-        r = auth_client.post("/conversations", json={"user_id": "testuser"})
+        r = auth_client.post("/conversations", json={"user_id": TEST_USER_ID})
         conv_id = json.loads(r.data)["conv_id"]
         r2 = auth_client.get(f"/conversations/{conv_id}/messages")
         assert r2.status_code == 200
         assert isinstance(json.loads(r2.data), list)
 
     def test_search_conversations(self, auth_client):
-        r = auth_client.get("/conversations/testuser/search?q=anything")
+        r = auth_client.get(f"/conversations/{TEST_USER_ID}/search?q=anything")
         assert r.status_code == 200
         assert isinstance(json.loads(r.data), list)
 
     def test_search_empty_query_returns_all(self, auth_client):
-        r = auth_client.get("/conversations/testuser/search?q=")
+        r = auth_client.get(f"/conversations/{TEST_USER_ID}/search?q=")
         assert r.status_code == 200
 
 
@@ -148,7 +154,7 @@ class TestConversations:
 class TestUpload:
 
     def _new_conv(self, auth_client) -> str:
-        r = auth_client.post("/conversations", json={"user_id": "testuser"})
+        r = auth_client.post("/conversations", json={"user_id": TEST_USER_ID})
         return json.loads(r.data)["conv_id"]
 
     def test_no_file_part_returns_400(self, auth_client):
@@ -218,7 +224,7 @@ class TestPromptEndpoint:
     """
 
     def _new_conv(self, auth_client) -> str:
-        r = auth_client.post("/conversations", json={"user_id": "testuser"})
+        r = auth_client.post("/conversations", json={"user_id": TEST_USER_ID})
         return json.loads(r.data)["conv_id"]
 
     def test_empty_prompt_returns_400(self, auth_client):

@@ -7,6 +7,10 @@ from __future__ import annotations
 
 import json
 
+# The user the tests sign in as. A UUID, because init_db() migrates any
+# non-UUID user_id to a fresh UUID; conftest.py seeds it as display name 'testuser'.
+TEST_USER_ID = "00000000-0000-4000-8000-000000000001"
+
 
 def parse_sse(data: bytes) -> list[dict]:
     """

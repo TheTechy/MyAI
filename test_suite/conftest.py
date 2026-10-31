@@ -7,7 +7,7 @@ Responsibilities
 ----------------
 - Set required environment variables *before* any app module is imported
   (DB path, model path, port, etc.)
-- Replace llama_cpp with a MagicMock so no real model file is needed
+- Replace llama_cpp with test_suite/fake_llama_cpp so no real model file is needed
 - Stub faster-whisper for machines where it may not be installed
 - Expose session/function-scoped pytest fixtures used across all test files
 """
@@ -36,23 +36,14 @@ os.environ.setdefault("USERS",      "testuser")
 
 
 # ── llama_cpp stub ─────────────────────────────────────────────────────────────
-# The real Llama constructor loads a multi-GB model file; we short-circuit it.
-# The stub is configured to return a plausible "general" response for all calls
-# so the SSE pipeline exercises the happy path without requiring any model.
+# The real Llama constructor loads a multi-GB model file; we short-circuit it
+# with the same fake the smoke tests use. A bare MagicMock isn't enough: the
+# engine reads string metadata (the chat template) and the chat-completion API.
+# The fake answers "hello" to every call, so classification falls back to
+# "general" and the SSE pipeline takes the happy path.
+import fake_llama_cpp  # noqa: E402 — test_suite/ is on sys.path via conftest
 
-_llm_mock = MagicMock(name="llm_instance")
-_llm_mock.n_ctx.return_value = 4096
-_llm_mock.n_tokens = 0
-# Default return value for both classifier and routing calls (non-streaming):
-# "Paris is the capital of France." is not a valid category, so the classifier
-# falls back to "general", and the routing pass returns it as the answer.
-_llm_mock.return_value = {
-    "choices": [{"text": "Paris is the capital of France.", "finish_reason": "stop"}]
-}
-
-_llama_cpp_stub = MagicMock(name="llama_cpp_module")
-_llama_cpp_stub.Llama = MagicMock(return_value=_llm_mock)
-sys.modules.setdefault("llama_cpp", _llama_cpp_stub)
+sys.modules.setdefault("llama_cpp", fake_llama_cpp)
 
 # Stub faster_whisper — may not be installed on all machines
 sys.modules.setdefault("faster_whisper", MagicMock(name="faster_whisper"))
@@ -60,9 +51,31 @@ sys.modules.setdefault("faster_whisper", MagicMock(name="faster_whisper"))
 
 # ── Fixtures ───────────────────────────────────────────────────────────────────
 @pytest.fixture(scope="session")
-def llm_mock() -> MagicMock:
-    """Exposes the mock Llama instance so tests can inspect or reconfigure it."""
-    return _llm_mock
+def llm_mock():
+    """
+    Exposes the fake Llama class. The model loads lazily, so the instance the
+    app is using is Llama.instances[-1] once a request has run.
+    """
+    return fake_llama_cpp.Llama
+
+
+@pytest.fixture(scope="session", autouse=True)
+def test_user_row():
+    """
+    Make the user the tests sign in as a real users row. Conversations, files
+    and memories reference users(user_id) with foreign keys on, so without it
+    every write for that user fails.
+    """
+    from core.db import get_conn, init_db  # noqa: PLC0415 — after MYAIDB is set
+    from helpers import TEST_USER_ID  # noqa: PLC0415
+
+    init_db()
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO users (user_id, display_id, pin, created_at) "
+            "VALUES (?, 'testuser', '1234', datetime('now'))",
+            (TEST_USER_ID,),
+        )
 
 
 @pytest.fixture(scope="session")
@@ -89,9 +102,11 @@ def client(flask_app):
 def auth_client(flask_app):
     """
     Authenticated Flask test client.
-    Injects 'testuser' into the session so every request passes is_authenticated().
+    Signs in as the seeded test user so every request passes is_authenticated().
     """
+    from helpers import TEST_USER_ID  # noqa: PLC0415
+
     with flask_app.test_client() as c:
         with c.session_transaction() as sess:
-            sess["user_id"] = "testuser"
+            sess["user_id"] = TEST_USER_ID
         yield c
