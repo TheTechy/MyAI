@@ -37,7 +37,7 @@ DEFAULT_PORT = "8080"
 CTX_CHOICES = [
     ("8192", "Short chats — lightest on memory"),
     ("16384", "Everyday use — a good balance"),
-    ("32768", "Long chats and big documents — needs plenty of memory"),
+    ("32768", "Long chats and big documents"),
 ]
 AGE_BANDS = [
     ("adult", "Adult"),

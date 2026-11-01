@@ -162,4 +162,12 @@ try:
 finally:
     builtins.input = _real_input
 
+# The context screen's options fit the widest panel without being cut off with
+# '…', whichever one carries "(recommended)" and the "▶ " selection marker.
+inner = T.MAX_WIDTH - 4
+for rec, _ in S.CTX_CHOICES:
+    for option in M.context_options(T.TUI(), rec):
+        assert T.vis_len("▶ " + option) <= inner, (rec, option, T.vis_len("▶ " + option))
+print("ok  context options fit the panel")
+
 print("\nALL GREEN")
