@@ -205,6 +205,62 @@ class TestContext:
         assert engine._backend is None     # asking must not load the model
 
 
+# ── Chat privacy: nobody can reach another account's chats ─────────────────────
+class TestChatPrivacy:
+    """Another family member's chat, with a message and an uploaded file. The
+    signed-in test user must not be able to read, change or use any of it."""
+
+    @pytest.fixture
+    def their_chat(self):
+        from core.db import append_message, create_conversation, create_user, store_file_context
+        import uuid
+        other = create_user(f"sibling-{uuid.uuid4().hex[:6]}", "4321")
+        conv_id = create_conversation(other)
+        append_message(conv_id, "user", "my secret diary entry")
+        file_id = store_file_context(conv_id, other, "diary.txt", "private notes")
+        return {"conv_id": conv_id, "file_id": file_id}
+
+    def _their_messages(self, conv_id):
+        from core.db import get_messages
+        return get_messages(conv_id, max_turns=9999)
+
+    def test_cannot_read_their_messages(self, auth_client, their_chat):
+        r = auth_client.get(f"/conversations/{their_chat['conv_id']}/messages")
+        assert r.status_code == 404
+        assert "secret diary" not in r.get_data(as_text=True)
+
+    def test_cannot_delete_their_chat(self, auth_client, their_chat):
+        r = auth_client.delete(f"/conversations/{their_chat['conv_id']}")
+        assert r.status_code == 404
+        assert len(self._their_messages(their_chat["conv_id"])) == 1
+
+    def test_cannot_send_a_message_into_their_chat(self, auth_client, their_chat):
+        r = auth_client.post("/prompt", json={"prompt": "what did I write?",
+                                              "conv_id": their_chat["conv_id"]})
+        assert r.status_code == 404
+        assert len(self._their_messages(their_chat["conv_id"])) == 1
+
+    def test_cannot_upload_into_their_chat(self, auth_client, their_chat):
+        from core.db import get_file_contexts
+        r = auth_client.post(
+            "/upload",
+            data={"file": (io.BytesIO(b"sneaky"), "x.txt"), "conv_id": their_chat["conv_id"]},
+            content_type="multipart/form-data",
+        )
+        assert r.status_code == 404
+        assert len(get_file_contexts(their_chat["conv_id"])) == 1
+
+    def test_cannot_remove_their_uploaded_file(self, auth_client, their_chat):
+        from core.db import get_file_contexts
+        r = auth_client.delete(f"/upload/{their_chat['file_id']}")
+        assert r.status_code == 404
+        assert len(get_file_contexts(their_chat["conv_id"])) == 1
+
+    def test_unknown_chat_is_not_found(self, auth_client):
+        r = auth_client.get("/conversations/00000000-0000-4000-8000-00000000dead/messages")
+        assert r.status_code == 404
+
+
 # ── /upload ────────────────────────────────────────────────────────────────────
 class TestUpload:
 
