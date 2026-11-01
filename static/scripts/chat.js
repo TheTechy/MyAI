@@ -553,32 +553,40 @@ async function switchConversation(conv_id) {
 }
 
 // ── New chat ──────────────────────────────────────────────────────────────────
+// Put a just-created conversation at the top of the sidebar, under "Today", and select it.
+function showNewConvInSidebar(conv_id) {
+  const firstHeading = convListEl.querySelector('.conv-section-label');
+  const item = makeConvItem({ conv_id, title: 'New conversation' });
+
+  if (firstHeading && firstHeading.textContent === 'Today') {
+    firstHeading.after(item);
+  } else {
+    const heading = document.createElement('div');
+    heading.className   = 'conv-section-label';
+    heading.textContent = 'Today';
+    convListEl.prepend(item);
+    convListEl.prepend(heading);
+  }
+  setActiveConv(conv_id);
+}
+
+async function createConversation() {
+  const res = await fetch('/conversations', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({}),
+  });
+  if (!res.ok) throw new Error('Failed to create conversation.');
+  const { conv_id } = await res.json();
+  showNewConvInSidebar(conv_id);
+  return conv_id;
+}
+
 async function startNewConversation() {
   if (isStreaming) return;
 
   try {
-    const res  = await fetch('/conversations', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ user_id: userName }),
-    });
-    const data = await res.json();
-    currentConvId = data.conv_id;
-
-    const firstHeading = convListEl.querySelector('.conv-section-label');
-    const item = makeConvItem({ conv_id: currentConvId, title: 'New conversation' });
-
-    if (firstHeading && firstHeading.textContent === 'Today') {
-      firstHeading.after(item);
-    } else {
-      const heading = document.createElement('div');
-      heading.className   = 'conv-section-label';
-      heading.textContent = 'Today';
-      convListEl.prepend(item);
-      convListEl.prepend(heading);
-    }
-
-    setActiveConv(currentConvId);
+    await createConversation();
     showEmptyState();
     clearAllAttachments();
     refreshCtxBar();
@@ -912,19 +920,7 @@ async function sendPrompt(promptText) {
 
         // ── New conversation ID assigned by server ──
         if (eventType === 'conv_id') {
-          currentConvId = payload.conv_id;
-          const item = makeConvItem({ conv_id: currentConvId, title: 'New conversation' });
-          const firstHeading = convListEl.querySelector('.conv-section-label');
-          if (firstHeading && firstHeading.textContent === 'Today') {
-            firstHeading.after(item);
-          } else {
-            const heading = document.createElement('div');
-            heading.className   = 'conv-section-label';
-            heading.textContent = 'Today';
-            convListEl.prepend(item);
-            convListEl.prepend(heading);
-          }
-          setActiveConv(currentConvId);
+          showNewConvInSidebar(payload.conv_id);
         }
 
         if (eventType === 'status') {
@@ -1004,6 +1000,8 @@ async function handleSend() {
 
   try {
     if (window.hasPendingFile?.()) {
+      // A file is stored against a chat, so a brand-new chat must exist first.
+      if (!currentConvId) await createConversation();
       const uploaded = await window.uploadPendingFile(currentConvId);
       if (!uploaded) showError('File upload failed — sending message without attachment.');
     }
