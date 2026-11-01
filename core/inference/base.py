@@ -224,6 +224,16 @@ class InferenceBackend(ABC):
         """
         return None
 
+    def count_tokens(self, messages: List[ChatMessage]) -> Optional[int]:
+        """How many tokens `messages` would take up as a prompt, without running
+        the model. Drives the context bar, which shows how full a chat's NEXT
+        message will be.
+
+        Default None — the bar then shows "—". Concrete, not abstract, so adding
+        it breaks no existing backend.
+        """
+        return None
+
     def warmup(self) -> bool:
         """Optional: page weights in / JIT kernels so the first real prompt isn't
         slow. Default is a no-op returning False (not warmed). The in-process

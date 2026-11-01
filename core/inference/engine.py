@@ -19,7 +19,7 @@ import os
 from typing import Any, Dict, Iterator, Optional
 
 from .dispatch import build_skill_map
-from .pipeline import PipelineDeps, _sse, run_turn
+from .pipeline import PipelineDeps, _sse, context_usage as _context_usage, run_turn
 
 # ── backend singleton (replaces v1's import-time global Llama) ───────────────────
 _backend: Optional[Any] = None
@@ -147,3 +147,11 @@ def ask_stream(user_input: str, user_id: str, conv_id: str) -> Iterator[str]:
         print(f"[engine] unhandled error in ask_stream: {type(e).__name__}: {e}")
         yield _sse("error",
                    {"message": "Something went wrong generating a response."})
+
+
+def context_usage(user_id: str, conv_id: Optional[str]) -> Optional[dict]:
+    """How full the next message in conv_id will be, for the context bar. None
+    while the model isn't loaded: a page load shouldn't trigger the slow load."""
+    if _backend is None:
+        return None
+    return _context_usage(user_id, conv_id, backend=_backend, deps=_get_deps())

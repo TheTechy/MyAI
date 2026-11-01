@@ -162,6 +162,49 @@ class TestConversations:
         assert r.status_code == 200
 
 
+# ── /context (the context bar) ─────────────────────────────────────────────────
+class TestContext:
+
+    @pytest.fixture(autouse=True)
+    def model_loaded(self):
+        from core.inference import engine
+        engine.get_backend()
+
+    def test_requires_auth(self, client):
+        assert client.get("/context").status_code == 401
+
+    def test_new_chat_counts_the_system_prompt(self, auth_client):
+        r = auth_client.get("/context")
+        assert r.status_code == 200
+        body = json.loads(r.data)
+        assert body["used"] > 0
+        assert body["max"] == 4096
+        assert body["remaining"] == body["max"] - body["used"]
+
+    def test_grows_with_the_chat(self, auth_client):
+        from core.db import append_message
+        conv_id = json.loads(auth_client.post("/conversations", json={}).data)["conv_id"]
+        empty = json.loads(auth_client.get(f"/context?conv_id={conv_id}").data)["used"]
+        append_message(conv_id, "user", "Tell me about the Battle of Britain please")
+        append_message(conv_id, "model", "It was fought over southern England in 1940.")
+        grown = json.loads(auth_client.get(f"/context?conv_id={conv_id}").data)["used"]
+        assert grown > empty
+
+    def test_someone_elses_chat_is_not_found(self, auth_client):
+        from core.db import create_conversation, create_user
+        other = create_user("context-other", "4321")
+        conv_id = create_conversation(other)
+        assert auth_client.get(f"/context?conv_id={conv_id}").status_code == 404
+
+    def test_model_not_loaded_yet_returns_null(self, auth_client, monkeypatch):
+        from core.inference import engine
+        monkeypatch.setattr(engine, "_backend", None)
+        r = auth_client.get("/context")
+        assert r.status_code == 200
+        assert json.loads(r.data) is None
+        assert engine._backend is None     # asking must not load the model
+
+
 # ── /upload ────────────────────────────────────────────────────────────────────
 class TestUpload:
 

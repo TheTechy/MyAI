@@ -6,7 +6,7 @@ from pathlib import Path
 from flask import Flask, request, render_template, Response, stream_with_context, session, redirect, url_for, send_file, abort
 from werkzeug.utils import secure_filename
 #from core.llm_inference import ask_stream, warmup
-from core.inference.engine import ask_stream, warmup
+from core.inference.engine import ask_stream, context_usage, warmup
 from core.file_ingestion import extract_text, ExtractionError, SUPPORTED_EXTENSIONS, IMAGE_EXTENSIONS
 from waitress import serve
 from dotenv import load_dotenv
@@ -283,6 +283,26 @@ def get_conversation_messages(conv_id: str):
 
     messages = get_messages(conv_id, max_turns=9999)
     return json.dumps(messages)
+
+
+@app.route('/context', methods=['GET'])
+def get_context_usage():
+    """
+    How full the context will be when the next message is sent (the context bar).
+
+    Query param: ?conv_id=<uuid>  (omit for a new, empty chat)
+    Response JSON: { "used", "max", "remaining", "pct" }, or null while the model
+                   is still loading.
+    """
+    if not is_authenticated():
+        return json.dumps({"error": "Unauthorized"}), 401
+
+    user_id = session["user_id"]
+    conv_id = request.args.get("conv_id") or None
+    if conv_id and conv_id not in {c["conv_id"] for c in list_conversations(user_id)}:
+        return json.dumps({"error": "Conversation not found"}), 404
+
+    return json.dumps(context_usage(user_id, conv_id))
 
 
 @app.route('/files/<file_id>/download', methods=['GET'])

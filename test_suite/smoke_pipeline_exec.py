@@ -18,7 +18,7 @@ class FakeBackend:
                 yield {"choices":[{"delta":{"content":ch},"finish_reason":None}]}
             yield {"choices":[{"delta":{},"finish_reason":"length" if self._truncate else "stop"}]}
         return gen()
-    def context_used(self): return 100
+    def count_tokens(self, messages): return 100
     def context_window(self): return 1000
 
 # ── fake deps ────────────────────────────────────────────────────────────────────

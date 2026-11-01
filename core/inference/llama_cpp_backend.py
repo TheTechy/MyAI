@@ -33,6 +33,7 @@ from typing import Any, Dict, Iterator, List, Optional, Union
 from .base import (
     ChatCompletion,
     ChatCompletionChunk,
+    ChatMessage,
     InferenceBackend,
     OutputConstraint,
 )
@@ -66,6 +67,7 @@ class LlamaCppBackend(InferenceBackend):
         self._emits_think: bool = False
         self._trained_ctx: Optional[int] = None
         self._supports_system_role: bool = True
+        self._chat_formatter: Optional[Any] = None
 
     # ── lifecycle ──────────────────────────────────────────────────────────────
     @property
@@ -112,7 +114,8 @@ class LlamaCppBackend(InferenceBackend):
         # by rendering the model's OWN template (via llama-cpp's own formatter, so
         # it matches what create_chat_completion will actually do) with a system
         # sentinel. Drives whether the assembler emits a system message or fuses.
-        self._supports_system_role = self._detect_system_role_support(template)
+        self._chat_formatter = self._build_chat_formatter(template)
+        self._supports_system_role = self._detect_system_role_support()
         print(f"[llama_cpp] model supports system role: {self._supports_system_role}")
 
         # Context window: what the MODEL was trained for vs what we ASKED for.
@@ -171,20 +174,43 @@ class LlamaCppBackend(InferenceBackend):
     def _token_text(self, token_id: int) -> str:
         """Best-effort string for a special token id; '' if it can't decode.
 
-        eos/bos barely affect system-role detection (they only appear where the
-        template inserts them literally), so an empty fallback is harmless.
+        Prefers token_get_text, which is what llama-cpp itself hands the chat
+        template: detokenize renders special tokens like <bos> as '', which would
+        drop them from the prompt we count. An empty fallback only costs a token
+        or two of accuracy.
         """
+        try:
+            return self._llm._model.token_get_text(token_id)
+        except Exception:
+            pass
         try:
             return self._llm.detokenize([token_id]).decode("utf-8", errors="ignore")
         except Exception:
             return ""
 
-    def _detect_system_role_support(self, template: str) -> bool:
+    def _build_chat_formatter(self, template: str) -> Optional[Any]:
+        """llama-cpp's Jinja2ChatFormatter for the model's OWN template — the SAME
+        renderer create_chat_completion uses. None when there's no template or
+        the formatter can't be imported."""
+        if not template:
+            return None
+        try:
+            from llama_cpp.llama_chat_format import Jinja2ChatFormatter
+        except Exception:
+            return None
+        eos = self._token_text(self._llm.token_eos())
+        bos = self._token_text(self._llm.token_bos())
+        try:
+            return Jinja2ChatFormatter(template=template, eos_token=eos, bos_token=bos)
+        except Exception as e:
+            print(f"[llama_cpp] chat template won't compile ({e}); token counts are approximate")
+            return None
+
+    def _detect_system_role_support(self) -> bool:
         """Render the model's OWN template with a system sentinel to decide
         whether a {"role":"system"} message is honoured.
 
-        Uses llama-cpp's Jinja2ChatFormatter — the SAME renderer
-        create_chat_completion uses — so detection matches real behaviour.
+        Uses the chat formatter, so detection matches real behaviour.
 
         Returns:
           True  — sentinel survives into the rendered prompt (real system turn).
@@ -198,22 +224,14 @@ class LlamaCppBackend(InferenceBackend):
         instruction still reaches the model; the only cost is v1's long-chat
         drift. No current model does this, so it's documented, not guarded.
         """
-        if not template:
+        if self._chat_formatter is None:
             return True
-        try:
-            from llama_cpp.llama_chat_format import Jinja2ChatFormatter
-        except Exception:
-            return True
-
-        eos = self._token_text(self._llm.token_eos())
-        bos = self._token_text(self._llm.token_bos())
         probe = [
             {"role": "system", "content": self._SYS_ROLE_SENTINEL},
             {"role": "user", "content": "hi"},
         ]
         try:
-            fmt = Jinja2ChatFormatter(template=template, eos_token=eos, bos_token=bos)
-            rendered = fmt(messages=probe).prompt
+            rendered = self._chat_formatter(messages=probe).prompt
         except Exception:
             return False   # template rejects a system message
         return self._SYS_ROLE_SENTINEL in rendered
@@ -229,6 +247,7 @@ class LlamaCppBackend(InferenceBackend):
             self._emits_think = False
             self._trained_ctx = None
             self._supports_system_role = True
+            self._chat_formatter = None
 
     def _require(self) -> Any:
         if self._llm is None:
@@ -328,6 +347,29 @@ class LlamaCppBackend(InferenceBackend):
         """
         n = getattr(self._require(), "n_tokens", None)
         return int(n) if n is not None else None
+
+    def count_tokens(self, messages: List[ChatMessage]) -> int:
+        """Tokens the prompt for `messages` would take, without running the model.
+
+        Renders through the model's own chat template, as create_chat_completion
+        would, so the role markers and special tokens are counted too. Without a
+        usable template, counts just the message text — slightly low, but close.
+        """
+        llm = self._require()
+        if self._chat_formatter is not None:
+            try:
+                result = self._chat_formatter(messages=messages)
+                # Tokenized exactly as llama-cpp's chat handler does it, so the
+                # count matches the prompt the model really receives.
+                return len(llm.tokenize(
+                    result.prompt.encode("utf-8"),
+                    add_bos=not getattr(result, "added_special", False),
+                    special=True,
+                ))
+            except Exception as e:
+                print(f"[llama_cpp] couldn't render the chat template to count tokens: {e}")
+        text = "\n".join(str(m.get("content") or "") for m in messages)
+        return len(llm.tokenize(text.encode("utf-8"), add_bos=True))
 
     def trained_context_window(self) -> Optional[int]:
         """Context length this model was trained for, read at load. None if the
