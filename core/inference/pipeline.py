@@ -217,6 +217,45 @@ def _attach_file_blocks(user_input: str, file_contexts: List[dict]) -> str:
     return f"{blocks}\n\nUser question: {user_input}"
 
 
+def _system_prompt_for(user_id: str, deps: PipelineDeps) -> str:
+    system_prompt = deps.get_prompt_for_user(user_id)
+    if deps.file_gen_snippet:
+        system_prompt = f"{system_prompt}\n\n{deps.file_gen_snippet}"
+    return system_prompt
+
+
+def context_usage(user_id: str, conv_id: Optional[str], *,
+                  backend: Any, deps: PipelineDeps) -> Optional[dict]:
+    """How full the context will be when this chat's NEXT message is sent: the
+    system prompt, the history that turn will carry and any attached files,
+    counted with the model's tokenizer. No conv_id means a new, empty chat.
+
+    Measured from the chat itself rather than the engine's live token count,
+    which reflects whichever turn ran last, for any user. None when the backend
+    can't count tokens.
+    """
+    history = deps.get_messages(conv_id, MAX_HISTORY_TURNS) if conv_id else []
+    file_contexts = deps.get_file_contexts(conv_id) if conv_id else []
+    messages = assemble_messages(
+        _system_prompt_for(user_id, deps), history,
+        _attach_file_blocks("", file_contexts),
+        supports_system_role=backend.supports_system_role,
+    )
+    used = backend.count_tokens(messages)
+    if used is None:
+        return None
+    max_ctx = backend.context_window()
+    return {"used": used, "max": max_ctx, "remaining": max_ctx - used,
+            "pct": round(used / max_ctx * 100, 1)}
+
+
+def _ctx_event(user_id: str, conv_id: str, backend: Any,
+               deps: PipelineDeps) -> Iterator[str]:
+    usage = context_usage(user_id, conv_id, backend=backend, deps=deps)
+    if usage is not None:
+        yield _sse("ctx", usage)
+
+
 def run_turn(user_input: str, user_id: str, conv_id: str, *,
              backend: Any, skill_map: Dict[str, Any], deps: PipelineDeps,
              route_fn: Callable = _default_route) -> Iterator[str]:
@@ -227,9 +266,7 @@ def run_turn(user_input: str, user_id: str, conv_id: str, *,
     only (skill answers strip them), per ADR-0002's interim.
     """
     history = deps.get_messages(conv_id, MAX_HISTORY_TURNS)
-    system_prompt = deps.get_prompt_for_user(user_id)
-    if deps.file_gen_snippet:
-        system_prompt = f"{system_prompt}\n\n{deps.file_gen_snippet}"
+    system_prompt = _system_prompt_for(user_id, deps)
     file_contexts = deps.get_file_contexts(conv_id)
     prompt_input = _attach_file_blocks(user_input, file_contexts)
 
@@ -267,6 +304,7 @@ def run_turn(user_input: str, user_id: str, conv_id: str, *,
                 and plan.file.get("disk_path") and msg_id):
             deps.persist_files(msg_id, [plan.file])
         deps.auto_title(conv_id, user_input)
+        yield from _ctx_event(user_id, conv_id, backend, deps)
         if answer:
             yield _sse("token", {"text": answer})
         yield _sse("done", {"truncated": False})
@@ -308,18 +346,12 @@ def run_turn(user_input: str, user_id: str, conv_id: str, *,
     for f in files:
         yield _sse("file", _file_payload_for_client(f))
 
-    used = backend.context_used()
-    if used is not None:
-        max_ctx = backend.context_window()
-        yield _sse("ctx", {"used": used, "max": max_ctx,
-                           "remaining": max_ctx - used,
-                           "pct": round(used / max_ctx * 100, 1)})
-
     deps.append_message(conv_id, "user", user_input)
     msg_id = deps.append_message(conv_id, "model", answer)
     if files and msg_id:
         deps.persist_files(msg_id, files)
     deps.auto_title(conv_id, user_input)
+    yield from _ctx_event(user_id, conv_id, backend, deps)
 
     # Direct path buffered, so emit its (cleaned, single) token now; the context
     # path already streamed its tokens live.

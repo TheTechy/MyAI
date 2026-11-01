@@ -70,6 +70,29 @@ function updateCtxBar({ used, max, remaining, pct }) {
   ctxNums.textContent = `${used.toLocaleString()} / ${max.toLocaleString()} · ${remaining.toLocaleString()} free`;
 }
 
+function clearCtxBar() {
+  ctxFill.style.width = '0%';
+  ctxFill.classList.remove('warn', 'crit');
+  ctxPct.textContent  = '—';
+  ctxNums.textContent = '—';
+}
+
+// How full the current chat's next message will be. The server answers null
+// while the model is still loading; the next reply fills the bar in then.
+async function refreshCtxBar() {
+  const convId = currentConvId;
+  try {
+    const query = convId ? `?conv_id=${encodeURIComponent(convId)}` : '';
+    const res   = await fetch(`/context${query}`);
+    const usage = res.ok ? await res.json() : null;
+    if (convId !== currentConvId) return;   // the user switched chats meanwhile
+    if (usage) updateCtxBar(usage);
+    else       clearCtxBar();
+  } catch (e) {
+    clearCtxBar();
+  }
+}
+
 // ── Auto-grow textarea ───────────────────────────────────────────────────────
 inputEl.addEventListener('input', () => {
   inputEl.style.height = 'auto';
@@ -509,6 +532,7 @@ async function switchConversation(conv_id) {
   setActiveConv(conv_id);
   clearAllAttachments();
   chatEl.innerHTML = '';
+  refreshCtxBar();
 
   try {
     const res      = await fetch(`/conversations/${conv_id}/messages`);
@@ -557,6 +581,7 @@ async function startNewConversation() {
     setActiveConv(currentConvId);
     showEmptyState();
     clearAllAttachments();
+    refreshCtxBar();
     closeSidebar();
     inputEl.focus();
   } catch (e) {
@@ -584,6 +609,7 @@ async function deleteConversation(conv_id, itemEl) {
       } else {
         currentConvId = null;
         showEmptyState();
+        refreshCtxBar();
       }
     }
   } catch (e) {
@@ -706,6 +732,7 @@ function renderAttachedChips() {
       await fetch(`/upload/${fileId}`, { method: "DELETE" });
       attachedFiles = attachedFiles.filter(f => f.file_id !== fileId);
       renderAttachedChips();
+      refreshCtxBar();
     });
   });
 }
@@ -1158,6 +1185,7 @@ async function handleSend() {
 // ── Initialise ────────────────────────────────────────────────────────────────
 (async () => {
   showEmptyState();
+  refreshCtxBar();
   await loadConversations();
   inputEl.focus();
 })();

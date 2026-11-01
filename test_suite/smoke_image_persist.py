@@ -34,7 +34,7 @@ print("ok  empty disk_path field → no disk_path key (won't persist)")
 class FakeBackend:
     emits_think_reasoning = False; supports_system_role = True
     def create_chat_completion(self, *a, **k): return iter([])
-    def context_used(self): return None
+    def count_tokens(self, messages): return None
     def context_window(self): return 1000
 
 def deps_with(persisted):

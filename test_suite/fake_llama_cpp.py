@@ -26,6 +26,10 @@ class Llama:
         # llama-cpp resolves n_ctx=0 to the model's trained maximum
         return self._trained if n == 0 else n
     def close(self): self.closed = True
+    def tokenize(self, text, add_bos=True, special=False):
+        # One token per word: predictable counts for tests.
+        self.tokenize_calls = getattr(self, "tokenize_calls", []) + [(text, add_bos, special)]
+        return [0] * len(text.decode("utf-8").split())
     def create_chat_completion(self, **kw):
         self.calls.append(kw)
         if kw.get("stream"):
