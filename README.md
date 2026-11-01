@@ -64,6 +64,10 @@ cd MyAI
 ./install.sh
 ```
 
+On a Mac that has never used developer tools, `git` first opens a box asking
+to install Apple's **Command Line Tools**. Click **Install**, wait a few minutes
+for it to finish, then run the commands again.
+
 Setup walks you through six short steps. Use the arrow keys and Enter:
 
 1. **Check this Mac.** Memory, Apple Silicon and the developer tools.

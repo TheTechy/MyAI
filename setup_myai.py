@@ -174,14 +174,17 @@ def choose_model(ui: TUI, cfg: dict, existing: dict, ram: int | None) -> None:
         break
 
     rec = S.recommended_ctx(ram)
-    options = [f"{n:>6} tokens — {desc}" + (ui.dim("  (recommended)") if n == rec else "")
-               for n, desc in S.CTX_CHOICES]
-    i = ui.menu("How much should MyAI remember in a conversation?", options,
+    i = ui.menu("How much should MyAI remember in a conversation?", context_options(ui, rec),
                 default=S.choice_index(S.CTX_CHOICES, existing.get("CTX_SIZE", rec),
                                        S.choice_index(S.CTX_CHOICES, rec)),
                 intro=["More memory means longer conversations, but uses more of this "
                        "Mac's RAM. You can change this later."])
     cfg["CTX_SIZE"] = S.CTX_CHOICES[i][0]
+
+
+def context_options(ui: TUI, recommended: str) -> list[str]:
+    return [f"{n:>6} tokens — {desc}" + (ui.dim("  (recommended)") if n == recommended else "")
+            for n, desc in S.CTX_CHOICES]
 
 
 def _unquote(v: str) -> str:
