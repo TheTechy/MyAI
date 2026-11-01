@@ -12,6 +12,7 @@ from waitress import serve
 from dotenv import load_dotenv
 from core.db import (
 	create_conversation,
+	conversation_owner,
 	list_conversations,
 	search_conversations,
 	delete_conversation,
@@ -36,7 +37,7 @@ from core.db import (
 load_dotenv()  # loads from .env in the current directory
 
 # ── Version ────────────────────────────────────────────────────────────────────
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 
 # ── Pretty model name ──────────────────────────────────────────────────────────
@@ -136,6 +137,15 @@ def add_header(r):
 # ── Auth helper ────────────────────────────────────────────────────────────────
 def is_authenticated() -> bool:
     return "user_id" in session
+
+
+def owns_conversation(conv_id: str) -> bool:
+    """True if conv_id exists and belongs to the signed-in user. Routes answer
+    404 rather than 403 otherwise, so they don't reveal that the chat exists."""
+    return conversation_owner(conv_id) == session.get("user_id")
+
+
+_NOT_FOUND = json.dumps({"error": "Conversation not found"}), 404
 
 
 # ── Page routes ────────────────────────────────────────────────────────────────
@@ -280,6 +290,8 @@ def get_conversation_messages(conv_id: str):
     """
     if not is_authenticated():
         return json.dumps({"error": "Unauthorized"}), 401
+    if not owns_conversation(conv_id):
+        return _NOT_FOUND
 
     messages = get_messages(conv_id, max_turns=9999)
     return json.dumps(messages)
@@ -299,8 +311,8 @@ def get_context_usage():
 
     user_id = session["user_id"]
     conv_id = request.args.get("conv_id") or None
-    if conv_id and conv_id not in {c["conv_id"] for c in list_conversations(user_id)}:
-        return json.dumps({"error": "Conversation not found"}), 404
+    if conv_id and not owns_conversation(conv_id):
+        return _NOT_FOUND
 
     return json.dumps(context_usage(user_id, conv_id))
 
@@ -340,6 +352,8 @@ def remove_conversation(conv_id: str):
     """
     if not is_authenticated():
         return json.dumps({"error": "Unauthorized"}), 401
+    if not owns_conversation(conv_id):
+        return _NOT_FOUND
 
     delete_conversation(conv_id)
     return json.dumps({"deleted": conv_id})
@@ -545,6 +559,8 @@ def execute_prompt():
 
     user_id = session["user_id"]  # UUID — authoritative, never trust client
     conv_id = data.get("conv_id")
+    if conv_id is not None and not owns_conversation(conv_id):
+        return _NOT_FOUND
 
     # Auto-create a conversation if the client didn't supply one
     new_conv = conv_id is None
@@ -594,6 +610,8 @@ def upload_file():
     conv_id = request.form.get("conv_id")
     if not conv_id:
         return json.dumps({"error": "conv_id required"}), 400
+    if not owns_conversation(conv_id):
+        return _NOT_FOUND
 
     user_id  = session["user_id"]
     filename = secure_filename(file.filename)
@@ -662,7 +680,8 @@ def remove_uploaded_file(file_id: str):
     if not is_authenticated():
         return json.dumps({"error": "Unauthorized"}), 401
 
-    delete_file_context(file_id)
+    if not delete_file_context(file_id, session["user_id"]):
+        return json.dumps({"error": "File not found"}), 404
     return json.dumps({"deleted": file_id})
 
 # ── Voice transcription route ──────────────────────────────────────────────────

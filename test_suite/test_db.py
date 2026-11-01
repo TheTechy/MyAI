@@ -170,9 +170,15 @@ class TestFileContexts:
     def test_delete_file_context(self):
         conv_id = create_conversation(TEST_USER_ID)
         file_id = store_file_context(conv_id, TEST_USER_ID, "delete_me.txt", "temp")
-        delete_file_context(file_id)
+        assert delete_file_context(file_id, TEST_USER_ID) is True
         contexts = get_file_contexts(conv_id)
         assert not any(fc["file_id"] == file_id for fc in contexts)
+
+    def test_delete_file_context_only_by_its_owner(self):
+        conv_id = create_conversation(TEST_USER_ID)
+        file_id = store_file_context(conv_id, TEST_USER_ID, "mine.txt", "temp")
+        assert delete_file_context(file_id, "00000000-0000-4000-8000-0000000000ff") is False
+        assert any(fc["file_id"] == file_id for fc in get_file_contexts(conv_id))
 
     def test_multiple_files_per_conversation(self):
         conv_id = create_conversation(TEST_USER_ID)

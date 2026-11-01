@@ -533,6 +533,15 @@ def list_conversations(user_id: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def conversation_owner(conv_id: str) -> str | None:
+    """Return the user_id that owns a conversation, or None if it doesn't exist."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT user_id FROM conversations WHERE conv_id = ?", (conv_id,)
+        ).fetchone()
+    return row["user_id"] if row else None
+
+
 def get_conversation_title(conv_id: str) -> str | None:
     """Return the current title for a conversation, or None if not found."""
     with get_conn() as conn:
@@ -672,10 +681,15 @@ def get_file_contexts(conv_id: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def delete_file_context(file_id: str):
-    """Remove a single file context entry."""
+def delete_file_context(file_id: str, user_id: str) -> bool:
+    """Remove a single file context entry, only if user_id uploaded it.
+    Returns True if a row was deleted."""
     with get_conn() as conn:
-        conn.execute("DELETE FROM file_context WHERE file_id = ?", (file_id,))
+        cur = conn.execute(
+            "DELETE FROM file_context WHERE file_id = ? AND user_id = ?",
+            (file_id, user_id),
+        )
+    return cur.rowcount > 0
 
 
 # ── Message files (generated download cards) ──────────────────────────────────
