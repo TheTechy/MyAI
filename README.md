@@ -4,7 +4,7 @@
 
 <p align="center">
   A friendly AI assistant for your family that runs entirely on your own Mac.
-  Your chats, files and memories stay at home.
+  <br>Your chats, files and memories stay at home.
 </p>
 
 <p align="center">
