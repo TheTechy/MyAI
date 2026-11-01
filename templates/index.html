@@ -32,8 +32,8 @@
 			</div>
 
 			<div class="header-meta">
-				<span class="status-dot">Inference: Local</span>
-				<span class="model-badge">Model: <span><b>Gemma 4</b></span></span>
+				<span class="status-dot" title="Inference: Local">Inference: Local</span>
+				<span class="model-badge" title="{{ model_name | default('Local Model') }}">Model: <span><b>{{ model_name | default('Local Model') }}</b></span></span>
 			</div>
 		</header>
 

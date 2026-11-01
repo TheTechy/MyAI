@@ -145,7 +145,11 @@ def index():
     # remain in the DB for audit / undo but aren't sign-in-able.
     active_users = list_users(include_inactive=False)
     display_names = [u["display_id"] for u in active_users]
-    return render_template('index.html', users=display_names)
+    return render_template(
+        'index.html',
+        users=display_names,
+        model_name=model_display_name(os.getenv("MODEL", "")),
+    )
 
 
 @app.route('/chat', methods=['GET'])

@@ -362,3 +362,15 @@ select option {
 	header { padding: 14px 24px; }
 	.content { padding: 28px 24px; }
 }
+/* On a phone, keep the header to one line: the status keeps its dot (text
+   moves to the tooltip) and a long model name is cut short, not wrapped. */
+@media (max-width: 599px) {
+	.header-meta { min-width: 0; }
+	.status-dot { font-size: 0; gap: 0; }
+	.model-badge {
+		min-width: 0;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+}

@@ -26,6 +26,18 @@ import pytest
 from helpers import TEST_USER_ID, event_names, parse_sse, token_text
 
 
+# ── / (sign-in page) ───────────────────────────────────────────────────────────
+class TestSignInPage:
+
+    def test_shows_the_configured_model(self, client, monkeypatch):
+        monkeypatch.setenv("MODEL", "/models/Swift-Qwen3.8-27B-Q5_K_M.gguf")
+        r = client.get("/")
+        assert r.status_code == 200
+        page = r.get_data(as_text=True)
+        assert "Swift Qwen3.8 27B" in page
+        assert "Gemma 4" not in page
+
+
 # ── /auth ──────────────────────────────────────────────────────────────────────
 class TestAuth:
 
