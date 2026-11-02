@@ -395,7 +395,7 @@ def _build_map_html(
   <div id="header">
     <h1>{o_disp} &rarr; {d_disp}</h1>
     <div id="meta">
-      <span class="badge">&#128694; {dist_str}</span>
+      <span class="badge">&#128663; {dist_str}</span>
       <span class="badge">&#128336; {dur_str}</span>
     </div>
   </div>

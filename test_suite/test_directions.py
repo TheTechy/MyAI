@@ -45,3 +45,8 @@ def test_map_loads_its_tiles_through_myai(delivered):
     # so tiles come from MyAI's /tiles route rather than straight from OSM.
     assert "L.tileLayer('/tiles/{z}/{x}/{y}.png'" in delivered["html"]
     assert "tile.openstreetmap.org" not in delivered["html"]
+
+
+def test_distance_badge_shows_a_car_for_driving_directions(delivered):
+    assert '<span class="badge">&#128663; ' in delivered["html"]   # 🚗
+    assert "&#128694;" not in delivered["html"]                   # 🚶
