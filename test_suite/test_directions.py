@@ -40,7 +40,8 @@ def test_map_is_saved_so_it_survives_a_reload(delivered):
     assert delivered["mime"] == "text/html"
 
 
-def test_map_uses_openstreetmaps_current_tile_address(delivered):
-    # OSM retired the a./b./c. tile subdomains in favour of a single host.
-    assert "https://tile.openstreetmap.org/{z}/{x}/{y}.png" in delivered["html"]
-    assert "{s}.tile.openstreetmap.org" not in delivered["html"]
+def test_map_loads_its_tiles_through_myai(delivered):
+    # The map opens sandboxed, which strips the Referer OpenStreetMap requires,
+    # so tiles come from MyAI's /tiles route rather than straight from OSM.
+    assert "L.tileLayer('/tiles/{z}/{x}/{y}.png'" in delivered["html"]
+    assert "tile.openstreetmap.org" not in delivered["html"]

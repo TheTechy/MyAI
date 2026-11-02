@@ -311,6 +311,59 @@ class TestViewFile:
         assert r.status_code == 401
 
 
+# ── /tiles/<z>/<x>/<y>.png ─────────────────────────────────────────────────────
+class TestMapTiles:
+    """MyAI fetches map tiles for the sandboxed route map. The sandbox strips the
+    Referer, so the browser can't fetch them from OpenStreetMap itself."""
+
+    @pytest.fixture
+    def osm(self, monkeypatch):
+        import myai_skills.directions as directions
+        calls = []
+
+        class FakeResponse:
+            status_code = 200
+            content = b"\x89PNG tile"
+            headers = {"Content-Type": "image/png", "Cache-Control": "max-age=86400"}
+
+        def fake_get(url, headers=None, timeout=None):
+            calls.append({"url": url, "headers": headers or {}})
+            return FakeResponse()
+
+        monkeypatch.setattr(directions.requests, "get", fake_get)
+        return calls
+
+    def test_serves_the_tile_from_openstreetmap(self, client, osm):
+        # No sign-in: a sandboxed page can't send the session cookie.
+        r = client.get("/tiles/7/63/41.png")
+        assert r.status_code == 200
+        assert r.mimetype == "image/png"
+        assert r.data == b"\x89PNG tile"
+        assert osm[0]["url"] == "https://tile.openstreetmap.org/7/63/41.png"
+
+    def test_identifies_myai_to_openstreetmap(self, client, osm):
+        client.get("/tiles/7/63/41.png")
+        assert osm[0]["headers"]["User-Agent"].startswith("MyAI")
+
+    def test_lets_the_browser_cache_tiles(self, client, osm):
+        # OSM's policy asks clients to cache; the app's no-store default must not apply.
+        r = client.get("/tiles/7/63/41.png")
+        assert r.headers["Cache-Control"] == "max-age=86400"
+
+    @pytest.mark.parametrize("path", ["/tiles/20/0/0.png", "/tiles/2/4/0.png",
+                                      "/tiles/2/0/4.png", "/tiles/2/-1/0.png"])
+    def test_rejects_tiles_that_dont_exist(self, client, osm, path):
+        assert client.get(path).status_code == 404
+        assert osm == []
+
+    def test_reports_when_openstreetmap_fails(self, client, monkeypatch):
+        import myai_skills.directions as directions
+        def failing_get(*a, **k):
+            raise directions.requests.ConnectionError("offline")
+        monkeypatch.setattr(directions.requests, "get", failing_get)
+        assert client.get("/tiles/7/63/41.png").status_code == 502
+
+
 # ── /upload ────────────────────────────────────────────────────────────────────
 class TestUpload:
 
