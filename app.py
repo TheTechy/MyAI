@@ -840,6 +840,11 @@ def _print_banner():
         print(f"    {C}● ready{R}   {D}— warmup off; first prompt may be slow{R}\n")
 
 
+# Waitress's default of 4 is too few: a reply holds a thread while it streams,
+# and opening a route map requests dozens of tiles at once, each waiting on
+# OpenStreetMap. Idle threads cost next to nothing.
+SERVER_THREADS = 16
+
 if __name__ == "__main__":
     _print_banner()
-    serve(app, host="0.0.0.0", port=port)
+    serve(app, host="0.0.0.0", port=port, threads=SERVER_THREADS)
