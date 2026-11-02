@@ -183,7 +183,7 @@ analytics.
 | ask about the weather | OpenWeatherMap | the place name |
 | ask it to search the web | DuckDuckGo | the search words |
 | ask for the news | public news feeds (BBC, Guardian, Sky and others) | nothing (it just reads the headlines) |
-| ask for directions | OpenStreetMap | the two place names |
+| ask for directions | OpenStreetMap | the two place names, then the map area while you view the route map |
 | ask about currencies | Frankfurter (European Central Bank rates) | the currencies |
 | ask it to look something up | Wikipedia | the topic |
 

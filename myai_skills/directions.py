@@ -47,6 +47,8 @@ from .base import BaseSkill
 _USER_AGENT = "MyAI-DirectionsSkill/1.0"
 _NOMINATIM  = "https://nominatim.openstreetmap.org/search"
 _OSRM       = "https://router.project-osrm.org/route/v1/driving"
+_OSM_TILES  = "https://tile.openstreetmap.org"
+_TILE_MAX_ZOOM = 19
 _TIMEOUT    = 10  # seconds
 
 # Manoeuvre type → human-readable verb
@@ -163,6 +165,34 @@ def _resolve_personal_place(place: str, memories: Optional[list[dict]]) -> str:
         if keyword in content.lower():
             return _extract_address(content)
     return place
+
+
+class TileError(Exception):
+    """OpenStreetMap could not supply a map tile."""
+
+
+def fetch_tile(z: int, x: int, y: int) -> tuple[bytes, str]:
+    """
+    Fetch one OpenStreetMap tile for the route map. Returns (png_bytes,
+    cache_control). The map page is sandboxed, which strips the Referer OSM
+    requires of browsers, so MyAI fetches tiles itself, identified by its
+    User-Agent as OSM's tile policy asks of apps.
+    Raises ValueError for a tile that doesn't exist, TileError if OSM fails.
+    """
+    if not (0 <= z <= _TILE_MAX_ZOOM and 0 <= x < 2 ** z and 0 <= y < 2 ** z):
+        raise ValueError(f"No such map tile: {z}/{x}/{y}")
+    try:
+        r = requests.get(
+            f"{_OSM_TILES}/{z}/{x}/{y}.png",
+            headers={"User-Agent": _USER_AGENT},
+            timeout=_TIMEOUT,
+        )
+    except requests.RequestException as e:
+        raise TileError(f"Map tile {z}/{x}/{y} unavailable: {e}") from e
+    if r.status_code != 200 or r.headers.get("Content-Type") != "image/png":
+        raise TileError(f"Map tile {z}/{x}/{y} unavailable: HTTP {r.status_code}")
+    # Pass on OSM's caching so the browser keeps tiles, as the policy asks.
+    return r.content, r.headers.get("Cache-Control", "max-age=86400")
 
 
 def _geocode(place: str) -> tuple[float, float, str]:
@@ -380,7 +410,7 @@ def _build_map_html(
 <script>
   var coords = {coords_js};
   var map = L.map('map');
-  L.tileLayer('https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+  L.tileLayer('/tiles/{{z}}/{{x}}/{{y}}.png', {{
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     maxZoom: 19
   }}).addTo(map);

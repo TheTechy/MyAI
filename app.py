@@ -7,6 +7,7 @@ from flask import Flask, request, render_template, Response, stream_with_context
 from werkzeug.utils import secure_filename
 #from core.llm_inference import ask_stream, warmup
 from core.inference.engine import ask_stream, context_usage, warmup
+from myai_skills.directions import TileError, fetch_tile
 from core.file_ingestion import extract_text, ExtractionError, SUPPORTED_EXTENSIONS, IMAGE_EXTENSIONS
 from waitress import serve
 from dotenv import load_dotenv
@@ -128,6 +129,8 @@ _preload_whisper()
 
 @app.after_request
 def add_header(r):
+    if request.endpoint == "map_tile":
+        return r  # public map pictures: let the browser cache them (OSM's policy)
     r.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, private, max-age=0"
     r.headers["Pragma"] = "no-cache"
     r.headers["Expires"] = "0"
@@ -371,6 +374,24 @@ def view_message_file(file_id: str):
     response.headers["Content-Security-Policy"] = "sandbox allow-scripts allow-popups"
     response.headers["X-Content-Type-Options"] = "nosniff"
     return response
+
+
+@app.route('/tiles/<int:z>/<int:x>/<int:y>.png', methods=['GET'])
+def map_tile(z: int, x: int, y: int):
+    """
+    A map tile for the route map, fetched from OpenStreetMap by MyAI. The map
+    page is sandboxed, so the browser can't send OSM the Referer it requires.
+    No sign-in: the sandboxed page can't send the session cookie, and a tile is
+    a public map picture.
+    """
+    try:
+        png, cache_control = fetch_tile(z, x, y)
+    except ValueError:
+        abort(404)
+    except TileError as e:
+        print(f"[tiles] {e}")
+        abort(502)
+    return Response(png, mimetype="image/png", headers={"Cache-Control": cache_control})
 
 @app.route('/conversations/<conv_id>', methods=['DELETE'])
 def remove_conversation(conv_id: str):
