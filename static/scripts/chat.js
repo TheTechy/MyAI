@@ -627,7 +627,7 @@ async function deleteConversation(conv_id, itemEl) {
 
 // ── File download card ────────────────────────────────────────────────────────
 // Accepts two shapes:
-//   Live (from SSE):    { filename, mime_type, size, data }       // base64 blob
+//   Live (from SSE):    { filename, mime_type, size, data, file_id? }  // base64 blob; file_id once saved
 //   Restored (history): { filename, mime_type, size, file_id }    // server URL
 function renderFileCard(file, bubble) {
   const { filename, mime_type, size, data, file_id } = file;
@@ -658,19 +658,32 @@ function renderFileCard(file, bubble) {
     docx: '📘', xlsx: '📗',
   }[ext] ?? '📎';
 
+  // A saved HTML page (a route map) opens from MyAI's own address instead of
+  // downloading: OpenStreetMap refuses map tiles to a page opened from disk.
+  const opensAsPage = mime_type === 'text/html' && file_id;
+
   const card   = document.createElement('a');
-  card.href     = url;
-  card.download = filename;
   card.className = 'file-card';
+  if (opensAsPage) {
+    card.href   = `/files/${encodeURIComponent(file_id)}/view`;
+    card.target = '_blank';
+    card.rel    = 'noopener';
+  } else {
+    card.href     = url;
+    card.download = filename;
+  }
+  const actionIcon = opensAsPage
+    ? '<path d="M9 2h5v5M14 2L7 9M12 9.5V13a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3.5" stroke-linecap="round" stroke-linejoin="round"/>'
+    : '<path d="M8 2v8M4 7l4 4 4-4M2 13h12" stroke-linecap="round" stroke-linejoin="round"/>';
   card.innerHTML = `
     <span class="file-card-icon">${icon}</span>
     <span class="file-card-info">
       <span class="file-card-name">${escHtml(filename)}</span>
-      <span class="file-card-meta">${escHtml(kb)}</span>
+      <span class="file-card-meta">${escHtml(opensAsPage ? kb + ' · opens in a new tab' : kb)}</span>
     </span>
     <span class="file-card-dl">
       <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-        <path d="M8 2v8M4 7l4 4 4-4M2 13h12" stroke-linecap="round" stroke-linejoin="round"/>
+        ${actionIcon}
       </svg>
     </span>`;
 

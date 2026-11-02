@@ -83,4 +83,13 @@ run(ImageOld(), deps_with(persisted2))
 assert persisted2==[], "legacy no-disk_path image must not attempt persistence"
 print("ok  legacy image (no disk_path) → not persisted (graceful)")
 
+# 6) the live file event carries the stored file_id, so the card can open the
+#    file from MyAI's own address (route maps need that for their map tiles)
+def persist_with_ids(m, files):
+    for f in files: f["file_id"] = "FID-9"
+import dataclasses
+evs = run(Image5(), dataclasses.replace(deps_with([]), persist_files=persist_with_ids))
+assert [d.get("file_id") for e,d in evs if e=="file"] == ["FID-9"], evs
+print("ok  live file event carries the stored file_id")
+
 print("\nALL GREEN")

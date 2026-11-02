@@ -261,6 +261,56 @@ class TestChatPrivacy:
         assert r.status_code == 404
 
 
+# ── /files/<id>/view ───────────────────────────────────────────────────────────
+class TestViewFile:
+    """Generated HTML pages (route maps) open from MyAI's own address, so the
+    browser sends a Referer and OpenStreetMap serves the map tiles."""
+
+    def _generated_file(self, tmp_path, user_id, filename, mime, body):
+        from core.db import append_message, create_conversation, store_message_file
+        conv_id = create_conversation(user_id)
+        msg_id = append_message(conv_id, "model", "Here you go.")
+        path = tmp_path / filename
+        path.write_bytes(body)
+        return store_message_file(msg_id, filename, mime, len(body), str(path))
+
+    def test_owner_can_open_a_generated_page(self, auth_client, tmp_path):
+        file_id = self._generated_file(tmp_path, TEST_USER_ID, "route.html",
+                                       "text/html", b"<h1>Route</h1>")
+        r = auth_client.get(f"/files/{file_id}/view")
+        assert r.status_code == 200
+        assert r.mimetype == "text/html"
+        assert "attachment" not in r.headers.get("Content-Disposition", "")
+        assert b"<h1>Route</h1>" in r.data
+
+    def test_page_is_sandboxed_from_the_app(self, auth_client, tmp_path):
+        file_id = self._generated_file(tmp_path, TEST_USER_ID, "route.html",
+                                       "text/html", b"<p>map</p>")
+        r = auth_client.get(f"/files/{file_id}/view")
+        policy = r.headers.get("Content-Security-Policy", "")
+        assert policy.startswith("sandbox")
+        assert "allow-same-origin" not in policy
+
+    def test_other_peoples_pages_are_not_found(self, auth_client, tmp_path):
+        from core.db import create_user
+        import uuid
+        other = create_user(f"cousin-{uuid.uuid4().hex[:6]}", "2468")
+        file_id = self._generated_file(tmp_path, other, "their_route.html",
+                                       "text/html", b"<p>their trip</p>")
+        r = auth_client.get(f"/files/{file_id}/view")
+        assert r.status_code == 404
+        assert b"their trip" not in r.data
+
+    def test_only_html_files_open_as_pages(self, auth_client, tmp_path):
+        file_id = self._generated_file(tmp_path, TEST_USER_ID, "notes.txt",
+                                       "text/plain", b"just text")
+        assert auth_client.get(f"/files/{file_id}/view").status_code == 404
+
+    def test_requires_sign_in(self, client):
+        r = client.get("/files/00000000-0000-4000-8000-00000000dead/view")
+        assert r.status_code == 401
+
+
 # ── /upload ────────────────────────────────────────────────────────────────────
 class TestUpload:
 

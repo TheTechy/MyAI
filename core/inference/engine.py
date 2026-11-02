@@ -59,13 +59,14 @@ def _title_sse_if_updated(conv_id: str) -> Optional[str]:
 
 
 def _persist_message_files(msg_id: str, files: list) -> None:
-    """Link generated files to msg_id so download cards survive a reload."""
+    """Link generated files to msg_id so download cards survive a reload.
+    Records each stored file's file_id on its dict, for the live file event."""
     from core.db import store_message_file
     for f in files:
         if not f.get("disk_path"):
             continue
         try:
-            store_message_file(
+            f["file_id"] = store_message_file(
                 msg_id=msg_id, filename=f["filename"], mime_type=f["mime_type"],
                 size=f["size"], disk_path=f["disk_path"],
             )
