@@ -203,7 +203,7 @@ class PipelineDeps:
     has_file_block: Callable          # (text) -> bool
     extract_and_generate: Callable    # (text) -> list[file dict]
     strip_file_blocks: Callable       # (text) -> str
-    persist_files: Callable           # (msg_id, files) -> None
+    persist_files: Callable           # (msg_id, files) -> None; sets file_id on each stored file
     file_gen_snippet: str = ""        # appended to the system prompt (interim [FILE:])
 
 
@@ -293,16 +293,16 @@ def run_turn(user_input: str, user_id: str, conv_id: str, *,
 
     # ── FINAL_TEXT (memory) / FILE_DELIVER (image): no model pass ────────────────
     if plan.action in (FINAL_TEXT, FILE_DELIVER):
-        if plan.action == FILE_DELIVER and plan.file:
-            yield _sse("file", _file_payload_for_client(plan.file))
         answer = plan.text
         deps.append_message(conv_id, "user", user_input)
         msg_id = deps.append_message(conv_id, "model", answer)
         # F91 #1: persist a disk-backed delivered image so it survives a reload,
         # exactly like generated files do (no-op when there's no disk_path).
-        if (plan.action == FILE_DELIVER and plan.file
-                and plan.file.get("disk_path") and msg_id):
-            deps.persist_files(msg_id, [plan.file])
+        # Sent after persisting, so the event carries the stored file_id.
+        if plan.action == FILE_DELIVER and plan.file:
+            if plan.file.get("disk_path") and msg_id:
+                deps.persist_files(msg_id, [plan.file])
+            yield _sse("file", _file_payload_for_client(plan.file))
         deps.auto_title(conv_id, user_input)
         yield from _ctx_event(user_id, conv_id, backend, deps)
         if answer:
@@ -343,13 +343,14 @@ def run_turn(user_input: str, user_id: str, conv_id: str, *,
     # v1-parity: correct/wrap/extract/strip/suppress (see filegen.prepare_files)
     uploaded_names = {fc["filename"] for fc in file_contexts}
     answer, files = prepare_files(raw_answer, user_input, history, uploaded_names, deps)
-    for f in files:
-        yield _sse("file", _file_payload_for_client(f))
 
     deps.append_message(conv_id, "user", user_input)
     msg_id = deps.append_message(conv_id, "model", answer)
     if files and msg_id:
         deps.persist_files(msg_id, files)
+    # Sent after persisting, so each event carries its stored file_id.
+    for f in files:
+        yield _sse("file", _file_payload_for_client(f))
     deps.auto_title(conv_id, user_input)
     yield from _ctx_event(user_id, conv_id, backend, deps)
 

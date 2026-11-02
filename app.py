@@ -345,6 +345,33 @@ def download_message_file(file_id: str):
         download_name=row["filename"],
     )
 
+
+@app.route('/files/<file_id>/view', methods=['GET'])
+def view_message_file(file_id: str):
+    """
+    Open a generated HTML page (a route map) in the browser from MyAI's own
+    address. OpenStreetMap refuses map tiles to pages with no Referer, which is
+    what a downloaded file opened from disk is.
+    """
+    if not is_authenticated():
+        return json.dumps({"error": "Unauthorized"}), 401
+
+    row = get_message_file(file_id)
+    if not row or row["user_id"] != session.get("user_id") or row["mime_type"] != "text/html":
+        abort(404)
+
+    disk_path = Path(row["disk_path"])
+    if not disk_path.is_file():
+        abort(404)
+
+    response = send_file(disk_path, mimetype="text/html")
+    # The page's content came from the model and the internet, so sandbox it:
+    # its scripts run (Leaflet needs them), but without allow-same-origin it
+    # can't reach the signed-in session, cookies or the app's API.
+    response.headers["Content-Security-Policy"] = "sandbox allow-scripts allow-popups"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
 @app.route('/conversations/<conv_id>', methods=['DELETE'])
 def remove_conversation(conv_id: str):
     """

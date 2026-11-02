@@ -67,12 +67,13 @@ print("ok  title_event emits only when titled")
 
 # 5) persist_files skips no-disk files, calls store for real ones
 stored = []
-db.store_message_file = lambda **k: stored.append(k["filename"])
-deps.persist_files("m", [{"disk_path": None, "filename": "skip"},
-                         {"disk_path": "/x", "filename": "keep.txt",
-                          "mime_type": "text/plain", "size": 3}])
+db.store_message_file = lambda **k: stored.append(k["filename"]) or "FID-1"
+files = [{"disk_path": None, "filename": "skip"},
+         {"disk_path": "/x", "filename": "keep.txt", "mime_type": "text/plain", "size": 3}]
+deps.persist_files("m", files)
 assert stored == ["keep.txt"]
-print("ok  persist_files: skips diskless, stores real")
+assert "file_id" not in files[0] and files[1]["file_id"] == "FID-1"
+print("ok  persist_files: skips diskless, stores real and records its file_id")
 
 # 6) ask_stream drives run_turn with the singletons (backend/skills/deps)
 captured = {}

@@ -380,7 +380,7 @@ def _build_map_html(
 <script>
   var coords = {coords_js};
   var map = L.map('map');
-  L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+  L.tileLayer('https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     maxZoom: 19
   }}).addTo(map);
@@ -477,9 +477,21 @@ class DirectionsSkill(BaseSkill):
         filename = f"route_{_slug(origin)}_to_{_slug(destination)}.html"
 
         import base64
-        b64data = base64.b64encode(map_html.encode("utf-8")).decode("ascii")
+        map_bytes = map_html.encode("utf-8")
+        b64data = base64.b64encode(map_bytes).decode("ascii")
+
+        # Saved to disk so the map is stored with the chat: it survives a reload,
+        # and MyAI can serve it from its own address. OpenStreetMap blocks tiles
+        # for pages with no Referer, which is what a downloaded file opens as.
+        # On failure, deliver in-session only rather than lose the directions.
+        from core.file_generation import _save_to_disk
+        try:
+            disk_path = str(_save_to_disk(filename, map_bytes))
+        except Exception as e:                                # noqa: BLE001
+            print(f"[directions] map save failed ({e}); delivering without persistence")
+            disk_path = ""
 
         # SKILL_DELIVER: file goes straight to the SSE pipeline,
         # plain_text goes to the LLM for its conversational response.
         # This avoids putting the HTML into the LLM context window.
-        return f"SKILL_DELIVER|{filename}|text/html|{b64data}\n---\n{plain_text}"
+        return f"SKILL_DELIVER|{filename}|text/html|{b64data}|{disk_path}\n---\n{plain_text}"
