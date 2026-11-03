@@ -114,7 +114,7 @@ The setup app writes `.env` for you. For reference:
 | Image editing | *(attach)* "resize this to 400px wide" | local |
 | Memory | "remember I drink tea" | local |
 | Weather | "what's the weather in Rochdale?" | OpenWeatherMap (key) |
-| Web search | "who won the match last night?" | DuckDuckGo (`ddgs`) |
+| Web search | "who won the match last night?" | Public search engines (`ddgs`) |
 | News | "what's in the news today?" | public RSS feeds |
 | Directions | "driving directions from Manchester to Leeds" | Nominatim + OSRM |
 | Currency | "how much is 50 USD in GBP?" | Frankfurter |

@@ -42,23 +42,34 @@ _SEARCH_URL  = "https://en.wikipedia.org/w/api.php"
 _TIMEOUT     = 8   # seconds
 _MAX_CHARS   = 1800  # cap extract length to protect context window
 
+_POLITE_OPENING = re.compile(
+    r'^(please\s+)?((can|could|would|will)\s+you\s+)?(please\s+)?',
+    re.IGNORECASE,
+)
+
 # Phrases to strip from the front of the query before searching
 _QUERY_STRIP = re.compile(
-    r'^(what\s+is\s+(a\s+|an\s+|the\s+)?|'
-    r'who\s+(is|was)\s+(a\s+|an\s+|the\s+)?|'
-    r'tell\s+me\s+about\s+(a\s+|an\s+|the\s+)?|'
-    r'explain\s+(a\s+|an\s+|the\s+)?|'
-    r'describe\s+(a\s+|an\s+|the\s+)?|'
-    r'define\s+(a\s+|an\s+|the\s+)?|'
-    r'what\s+are\s+(a\s+|an\s+|the\s+)?|'
+    r'^(what\s+is\s+|'
+    r'who\s+(is|was)\s+|'
+    r'tell\s+me\s+about\s+|'
+    r'explain\s+|'
+    r'describe\s+|'
+    r'define\s+|'
+    r'what\s+are\s+|'
+    r'(search|check|look\s+in|look\s+up)\s+((on|in)\s+)?wikipedia\s+(for|on|about)\s+|'
+    r'what\s+does\s+wikipedia\s+say\s+(about|on)\s+|'
     r'wikipedia\s+(article\s+)?(on|about|for)\s+|'
-    r'look\s+up\s+)',
+    # Only preamble when the request names Wikipedia: "Find My iPhone" is a title.
+    r'(search\s+(for\s+)?|find\s+|look\s+for\s+)(?=.*\bwikipedia\b)|'
+    r'look\s+(?=.*\bup\s+on\s+wikipedia\b)|'
+    r'look\s+up\s+)'
+    r'(a\s+|an\s+|the\s+)?',
     re.IGNORECASE,
 )
 
 # Trailing noise to strip
 _QUERY_TAIL = re.compile(
-    r'\s*(on\s+wikipedia|\?+|please|thanks|thank\s+you)$',
+    r'(\s+(up\s+)?(on|in|from)\s+wikipedia|\s*[?.!]+|\s+please|\s+thanks|\s+thank\s+you)+$',
     re.IGNORECASE,
 )
 
@@ -67,7 +78,8 @@ _QUERY_TAIL = re.compile(
 
 def _extract_subject(query: str) -> str:
     """Strip question preamble and return the core search subject."""
-    subject = _QUERY_STRIP.sub("", query.strip())
+    subject = _POLITE_OPENING.sub("", query.strip())
+    subject = _QUERY_STRIP.sub("", subject)
     subject = _QUERY_TAIL.sub("", subject).strip()
     return subject or query.strip()
 
