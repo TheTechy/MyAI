@@ -181,7 +181,7 @@ analytics.
 | When you… | MyAI contacts… | and sends… |
 |---|---|---|
 | ask about the weather | OpenWeatherMap | the place name |
-| ask it to search the web | DuckDuckGo | the search words |
+| ask it to search the web | a mix of public search engines (DuckDuckGo, Brave, Mojeek, Startpage, Yahoo, Wikipedia, Grokipedia), then the pages it finds | the search words to the engines; the sites only see a page request |
 | ask for the news | public news feeds (BBC, Guardian, Sky and others) | nothing (it just reads the headlines) |
 | ask for directions | OpenStreetMap | the two place names, then the map area while you view the route map |
 | ask about currencies | Frankfurter (European Central Bank rates) | the currencies |

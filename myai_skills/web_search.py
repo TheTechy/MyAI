@@ -1,10 +1,10 @@
 """
 skills/web_search.py
 ====================
-Web search skill — DuckDuckGo + intelligent content extraction.
+Web search skill — public search engines (via ddgs) + intelligent content extraction.
 
 Enhanced scraping pipelinea
-  1. DuckDuckGo → top 5 candidate URLs
+  1. Search engines → top candidate URLs
   2. Score and filter URLs (drop low-quality sources)
   3. Fetch each page → extract main content zones
   4. Score paragraphs by keyword relevance
@@ -12,7 +12,7 @@ Enhanced scraping pipelinea
 
 Dependencies
 ------------
-    pip install duckduckgo-search beautifulsoup4 requests
+    pip install ddgs beautifulsoup4 requests
 """
 
 from __future__ import annotations
@@ -30,6 +30,8 @@ try:
     _DDGS_AVAILABLE = True
 except ImportError:
     _DDGS_AVAILABLE = False
+    print("[web_search] WARNING: the ddgs package isn't installed, so web search "
+          "won't work. Run ./install.sh to install it.")
 
 # ── Search region ──────────────────────────────────────────────────────────────
 # Loaded once at startup from .env
@@ -52,8 +54,10 @@ except ImportError:
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-CANDIDATE_RESULTS  = 10     # fetch this many from DuckDuckGo
+CANDIDATE_RESULTS  = 10     # fetch this many from the search engines
 MAX_RESULTS        = 5      # return this many to the LLM
+SEARCH_ATTEMPTS    = 4      # ddgs scrapes engines without an API, so a search
+SEARCH_RETRY_DELAY = 1      # often fails once then works: seconds between tries
 MAX_CHARS_PAGE     = 2_500  # max chars per page in final output
 MAX_PARAGRAPHS     = 8      # max paragraphs extracted per page
 MIN_PARA_LEN       = 40     # ignore paragraphs shorter than this
@@ -110,11 +114,11 @@ HIGH_QUALITY_PATTERNS = re.compile(
 class WebSearchSkill(BaseSkill):
     """
     Handles queries requiring live / real-time information.
-    Uses DuckDuckGo for URLs and intelligent BS4 extraction for content.
+    Uses ddgs for URLs and intelligent BS4 extraction for content.
     """
 
     name        = "web_search"
-    description = "Search the web for current information using DuckDuckGo"
+    description = "Search the web for current information"
 
 
 
@@ -122,16 +126,11 @@ class WebSearchSkill(BaseSkill):
     # ── Main execution ────────────────────────────────────────────────────────
     def execute(self, query: str) -> str:
         if not _DDGS_AVAILABLE:
-            return "Web search unavailable: duckduckgo-search not installed."
+            return "Web search unavailable: the ddgs package is not installed."
 
-        # Step 1 — get candidates from DuckDuckGo
+        # Step 1 — get candidates from the search engines
         try:
-            with DDGS() as ddgs:
-                candidates = list(ddgs.text(
-                    query,
-                    region=_SEARCH_REGION,
-                    max_results=CANDIDATE_RESULTS,
-                ))
+            candidates = self._search(query)
         except Exception as exc:
             return f"Search error: {exc}"
 
@@ -160,9 +159,27 @@ class WebSearchSkill(BaseSkill):
 
         return "\n\n─────\n\n".join(parts)
 
+    def _search(self, query: str) -> list[dict]:
+        """Search, retrying failures. Raises the last error if every attempt fails."""
+        for attempt in range(1, SEARCH_ATTEMPTS + 1):
+            try:
+                with DDGS() as ddgs:
+                    results = list(ddgs.text(
+                        query,
+                        region=_SEARCH_REGION,
+                        max_results=CANDIDATE_RESULTS,
+                    ))
+                if results or attempt == SEARCH_ATTEMPTS:
+                    return results
+            except Exception:
+                if attempt == SEARCH_ATTEMPTS:
+                    raise
+            time.sleep(SEARCH_RETRY_DELAY)
+        return []
+
     # ── Result scoring ────────────────────────────────────────────────────────
     def _score_results(self, results: list[dict], query: str) -> list[dict]:
-        """Score DuckDuckGo results by quality signals, return sorted list."""
+        """Score search results by quality signals, return sorted list."""
         query_words = set(re.findall(r'\w+', query.lower()))
         scored = []
 

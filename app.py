@@ -38,7 +38,7 @@ from core.db import (
 load_dotenv()  # loads from .env in the current directory
 
 # ── Version ────────────────────────────────────────────────────────────────────
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 
 
 # ── Pretty model name ──────────────────────────────────────────────────────────
